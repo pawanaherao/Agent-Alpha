@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #09090b;
+  color: white;
+}
+
+/* AG Grid Dark Theme Override */
+.ag-theme-alpine-dark {
+  --ag-background-color: #18181b;
+  --ag-header-background-color: #27272a;
+  --ag-odd-row-background-color: #18181b;
+  --ag-row-hover-color: #27272a;
+  --ag-border-color: #3f3f46;
+  --ag-foreground-color: #e4e4e7;
+  --ag-secondary-foreground-color: #a1a1aa;
+}

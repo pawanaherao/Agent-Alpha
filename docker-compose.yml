@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # Frontend Service (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+    container_name: agent-alpha-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    networks:
+      - agent-alpha-net
+
+  # Backend Service (FastAPI Python)
+  backend:
+    build:
+      context: ./backend
+    container_name: agent-alpha-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - ENV=production
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./backend/data:/app/data # Persist data
+      - ./backend/logs:/app/logs # Persist logs
+    networks:
+      - agent-alpha-net
+
+networks:
+  agent-alpha-net:
+    driver: bridge

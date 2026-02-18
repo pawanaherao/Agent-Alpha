@@ -120,7 +120,8 @@ class ScannerAgent(BaseAgent):
             "ema_score": 0.10,
             "psar_score": 0.08,
             "bb_score": 0.07,
-            "genai_score": 0.10  # AI adds 10% weight
+            "delivery_score": 0.15, # High weight for institutional conviction
+            "genai_score": 0.05  # Reduced AI weight
         }
         
         self.project_id = getattr(settings, 'GCP_PROJECT', None)
@@ -272,7 +273,14 @@ class ScannerAgent(BaseAgent):
         bb_position = indicators.get('bb_position', 0.5)  # 0=lower, 0.5=mid, 1=upper
         scores['bb_score'] = 100 - abs(bb_position - 0.5) * 100  # Peak at middle
         
-        # 10. GenAI Score (if available)
+        # 10. Delivery % Score (Institutional Filter)
+        delivery_pct = indicators.get('delivery_pct', 0)
+        if delivery_pct >= filters.get('delivery_pct_min', 30):
+            scores['delivery_score'] = min(100, (delivery_pct / 60) * 100) # Max 100 at 60% delivery
+        else:
+            scores['delivery_score'] = (delivery_pct / 30) * 40 # Penalize low delivery
+        
+        # 11. GenAI Score (if available)
         if self.model:
             genai_score = await self._get_genai_score(symbol, indicators)
             scores['genai_score'] = genai_score
@@ -359,6 +367,11 @@ class ScannerAgent(BaseAgent):
             
             # 11. Current price
             indicators['price'] = float(close.iloc[-1])
+            
+            # 12. Delivery %
+            indicators['delivery_pct'] = await self.nse_service.get_delivery_percentage(df.get('symbol', 'UNKNOWN'))
+            if indicators['delivery_pct'] == 0 and 'symbol' in df.columns:
+                 indicators['delivery_pct'] = await self.nse_service.get_delivery_percentage(df['symbol'].iloc[0])
             
         except Exception as e:
             logger.debug(f"Indicator calculation error: {e}")

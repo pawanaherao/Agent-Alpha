@@ -58,4 +58,16 @@ export interface DashboardState {
     positions: Position[];
     signals: TradingSignal[];
     marketStatus: MarketStatus;
+    strategyPerformance: StrategyPerformance[];
+}
+
+// Strategy Performance
+export interface StrategyPerformance {
+    strategyId: string;
+    name: string;
+    pnl: number;
+    roi: number;
+    winRate: number;
+    trades: number;
+    active: boolean;
 }

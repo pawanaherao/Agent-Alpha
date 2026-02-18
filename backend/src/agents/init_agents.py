@@ -102,6 +102,21 @@ async def initialize_strategy_agent(config: Dict[str, Any]) -> StrategyAgent:
     # 16. Volatility Crush (Replaces Iron Condor risk)
     await agent.register_strategy(VolatilityCrushStrategy())
     
+    # === WAVE 3 STRATEGIES (Phase 6 - Institutional) ===
+    
+    # 17. Statistical Arbitrage (Pairs)
+    await agent.register_strategy(StatisticalArbitrageStrategy())
+    
+    # 18. Volatility Arbitrage
+    await agent.register_strategy(VolatilityArbitrageStrategy())
+    
+    # 19. Cross-Sectional Momentum
+    await agent.register_strategy(CrossSectionalMomentumStrategy())
+
+    # 20. Universal Strategy (Phase 7 - No-Code Builder)
+    # Note: Config will be injected at runtime by the Builder API
+    await agent.register_strategy(UniversalStrategy())
+    
     # === LEGACY (For Comparison) ===
     await agent.register_strategy(VWAPBounceStrategy())
     await agent.register_strategy(TrendFollowingStrategy())

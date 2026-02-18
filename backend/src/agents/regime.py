@@ -9,6 +9,9 @@ Based on: ADX (trend strength), EMA alignment, RSI, VIX
 from typing import Dict, Any, Optional
 import pandas as pd
 import ta
+import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 from datetime import datetime
 
 from src.agents.base import BaseAgent
@@ -124,51 +127,52 @@ class RegimeAgent(BaseAgent):
             current_ema_20 = ema_20.iloc[-1] if not ema_20.empty else current_price
             current_ema_50 = ema_50.iloc[-1] if not ema_50.empty else current_price
             
-            # 2. Apply WHITEBOX Logic Rules
+            # 2. Statistical Regime Detection (Phase 4)
+            statistical_regime = await self._detect_regime_kmeans(market_data)
+            
+            # 3. Apply WHITEBOX Logic Rules + Statistical Fusion
             
             # VIX Override: High volatility = VOLATILE
             if self.current_vix > 25:
                 regime = "VOLATILE"
                 self.logger.info(f"VIX Override: {self.current_vix:.2f} > 25")
             
-            # Trend Classification
+            # If statistical regime is confident, use it to augment rules
+            elif statistical_regime and statistical_regime != "SIDEWAYS":
+                regime = statistical_regime
+                self.logger.info(f"Statistical Regime detected: {regime}")
+            
+            # Rule-based fallback/refinement
             elif current_adx > 25:  # Strong trend
                 if current_price > current_ema_20 > current_ema_50:
                     regime = "BULL"
                 elif current_price < current_ema_20 < current_ema_50:
                     regime = "BEAR"
                 else:
-                    regime = "VOLATILE"  # Trending but unclear direction
+                    regime = "VOLATILE"
             
-            # Non-trending (Sideways) Classification
             else:
                 if current_rsi > 60 and current_price > current_ema_20:
-                    regime = "BULL"  # Sideways with bullish bias
+                    regime = "BULL"
                 elif current_rsi < 40 and current_price < current_ema_20:
-                    regime = "BEAR"  # Sideways with bearish bias
+                    regime = "BEAR"
                 else:
                     regime = "SIDEWAYS"
             
             # Update state
             self.current_regime = regime
             
-            # Log decision rationale (SEBI whitebox requirement)
+            # Log decision rationale
             self.logger.info(
-                f"Regime Decision: {regime} | "
-                f"ADX={current_adx:.1f}, RSI={current_rsi:.1f}, "
-                f"Price={current_price:.1f}, EMA20={current_ema_20:.1f}, EMA50={current_ema_50:.1f}, "
-                f"VIX={self.current_vix:.1f}"
+                f"Regime Decision: {regime} (Stat: {statistical_regime}) | "
+                f"ADX={current_adx:.1f}, RSI={current_rsi:.1f}, VIX={self.current_vix:.1f}"
             )
             
-            # 3. Publish Event
+            # 4. Publish Event
             await self.publish_event("REGIME_UPDATED", {
                 "regime": regime,
-                "adx": float(current_adx),
-                "rsi": float(current_rsi),
+                "statistical_regime": statistical_regime,
                 "vix": float(self.current_vix),
-                "price": float(current_price),
-                "ema_20": float(current_ema_20),
-                "ema_50": float(current_ema_50),
                 "timestamp": datetime.now().isoformat()
             })
             
@@ -177,6 +181,65 @@ class RegimeAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Regime Classification Failed: {e}", exc_info=True)
             return "SIDEWAYS"  # Safe fallback
+
+    async def _detect_regime_kmeans(self, df: pd.DataFrame) -> str:
+        """
+        Unsupervised Regime Detection using K-Means.
+        Clusters are mapped to: BULL, BEAR, SIDEWAYS, VOLATILE.
+        """
+        try:
+            if len(df) < 30: return "SIDEWAYS"
+            
+            # 1. Feature Engineering
+            df_feat = pd.DataFrame()
+            df_feat['returns'] = df['close'].pct_change()
+            df_feat['volatility'] = df_feat['returns'].rolling(10).std()
+            df_feat['momentum'] = ta.momentum.rsi(df['close'], window=14) / 100
+            
+            X = df_feat.dropna()
+            if len(X) < 20: return "SIDEWAYS"
+            
+            # 2. Normalization
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            
+            # 3. K-Means Clustering (4 regimes)
+            kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
+            clusters = kmeans.fit_predict(X_scaled)
+            
+            # Get latest cluster
+            latest_cluster = clusters[-1]
+            
+            # 4. Map Clusters to Human-Readable Regimes
+            # Strategy: Analyze cluster centers
+            centers = kmeans.cluster_centers_
+            # Centers columns: 0=Returns, 1=Volatility, 2=Momentum (scaled)
+            
+            # Bull: High returns, Low volatility, High Momentum
+            # Bear: Low returns, High Volatility, Low Momentum
+            # Sideways: Low returns, Low Volatility, Mid Momentum
+            # Volatile: Mixed returns, Very High Volatility
+            
+            # Find Bull: Highest returns * momentum
+            cluster_ranks = {}
+            for i in range(4):
+                score = centers[i, 0] + centers[i, 2] - centers[i, 1]
+                cluster_ranks[i] = score
+                
+            sorted_clusters = sorted(cluster_ranks.items(), key=lambda x: x[1])
+            
+            mapping = {
+                sorted_clusters[3][0]: "BULL",
+                sorted_clusters[0][0]: "BEAR",
+                sorted_clusters[1][0]: "SIDEWAYS",
+                sorted_clusters[2][0]: "VOLATILE"
+            }
+            
+            return mapping.get(latest_cluster, "SIDEWAYS")
+            
+        except Exception as e:
+             self.logger.debug(f"K-Means Regime detection failed: {e}")
+             return "SIDEWAYS"
     
     def get_regime_strategy_weights(self) -> Dict[str, float]:
         """

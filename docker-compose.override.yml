@@ -1,0 +1,18 @@
+version: '3.8'
+
+# Local development overrides - provides hot-reload and easier debugging
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+
+services:
+  backend:
+    environment:
+      - ENV=development
+      - DEBUG=true
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    environment:
+      - NODE_ENV=development
+    command: npm run dev

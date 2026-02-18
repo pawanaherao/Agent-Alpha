@@ -1,59 +1,61 @@
-"""Quick test of NSE Data Service"""
-from nselib import capital_market, derivatives
-from datetime import datetime, timedelta
+"""Quick test of NSE Data Service (yfinance backend)"""
+import asyncio
+import sys
+import os
 
-print("Testing nselib connection...")
+# Add src to path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Test 1: Get index data for NIFTY 50
-try:
-    end_date = datetime.now().strftime("%d-%m-%Y")
-    start_date = (datetime.now() - timedelta(days=30)).strftime("%d-%m-%Y")
+from src.services.nse_data import nse_data_service
+
+async def main():
+    print("Testing NSE Data Service (yfinance backend)...")
     
-    data = capital_market.index_data(
-        index="NIFTY 50",
-        from_date=start_date,
-        to_date=end_date
-    )
-    print(f"✅ NIFTY 50 Historical: {len(data)} days of data")
-    if not data.empty:
-        print(f"   Latest Close: {data.iloc[-1]['CLOSE'] if 'CLOSE' in data.columns else data.iloc[-1]}")
-except Exception as e:
-    print(f"❌ Index data failed: {e}")
+    # Test 1: Get index data for NIFTY 50
+    try:
+        print("\n1. Testing Index Data (NIFTY 50)...")
+        df = await nse_data_service.get_index_ohlc("NIFTY 50", period="1M")
+        print(f"✅ NIFTY 50 Historical: {len(df)} days of data")
+        if not df.empty:
+            latest = df.iloc[-1]
+            print(f"   Latest: {latest['date']} | Close: {latest['close']}")
+    except Exception as e:
+        print(f"❌ Index data failed: {e}")
 
-# Test 2: Get stock price data
-try:
-    data = capital_market.price_volume_and_deliverable_position_data(
-        symbol="RELIANCE",
-        from_date=start_date,
-        to_date=end_date
-    )
-    print(f"✅ RELIANCE Stock Data: {len(data)} days")
-    if not data.empty:
-        print(f"   Columns: {list(data.columns)}")
-except Exception as e:
-    print(f"❌ Stock data failed: {e}")
+    # Test 2: Get stock price data
+    try:
+        print("\n2. Testing Stock Data (RELIANCE)...")
+        df = await nse_data_service.get_stock_ohlc("RELIANCE", period="1M")
+        print(f"✅ RELIANCE Stock Data: {len(df)} days")
+        if not df.empty:
+            latest = df.iloc[-1]
+            print(f"   Latest: {latest['date']} | Close: {latest['close']}")
+    except Exception as e:
+        print(f"❌ Stock data failed: {e}")
 
-# Test 3: Get option chain
-try:
-    chain = derivatives.nse_live_option_chain("NIFTY")
-    if chain is not None:
-        spot = chain.get('records', {}).get('underlyingValue', 0)
-        expiries = chain.get('records', {}).get('expiryDates', [])
-        print(f"✅ NIFTY Option Chain: Spot = {spot}")
-        print(f"   Expiries: {expiries[:3]}...")
-    else:
-        print("❌ Option chain returned None")
-except Exception as e:
-    print(f"❌ Option chain failed: {e}")
+    # Test 3: Get option chain
+    try:
+        print("\n3. Testing Option Chain (NIFTY)...")
+        chain = await nse_data_service.get_option_chain("NIFTY")
+        if chain:
+            spot = chain.get('spot_price', 0)
+            expiries = chain.get('expiry_dates', [])
+            print(f"✅ NIFTY Option Chain: Spot = {spot}")
+            print(f"   Expiries: {expiries[:3]}...")
+        else:
+            print("❌ Option chain returned empty")
+    except Exception as e:
+        print(f"❌ Option chain failed: {e}")
 
-# Test 4: Get F&O lot sizes
-try:
-    lots = derivatives.fno_lot_size()
-    if lots is not None and not lots.empty:
-        print(f"✅ F&O Lot Sizes: {len(lots)} symbols")
-    else:
-        print("⚠️ F&O lot sizes empty")
-except Exception as e:
-    print(f"❌ F&O lot sizes failed: {e}")
+    # Test 4: Get India VIX
+    try:
+        print("\n4. Testing India VIX...")
+        vix = await nse_data_service.get_india_vix()
+        print(f"✅ India VIX: {vix}")
+    except Exception as e:
+         print(f"❌ India VIX failed: {e}")
 
-print("\n✅ NSE Data Service tests complete!")
+    print("\n✅ NSE Data Service tests complete!")
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,9 +1,87 @@
+# ============================================================================
+# Agentic Alpha 2026 - ULTIMATE ALGO PRODUCTION STACK
+# Python Version: 3.12.x REQUIRED (for Speed & DhanHQ Compatibility)
+# ============================================================================
+# Optimized for: High-Frequency Trading, Option Greeks, and Automated Reporting
+# Tested on: Windows 11, Python 3.12.10
+# ============================================================================
+
+# --- TIER 0: Core High-Performance Engine ---
+# Vectorized operations & Just-In-Time (JIT) compilation
+numpy>=2.2.6        # High Performance Upgrade
+pandas>=3.0.0       # High Performance Upgrade
+numba>=0.61.2       # High Performance Upgrade
+llvmlite>=0.43.0
+scipy>=1.17.0
+polars>=1.38.1
+bottleneck>=1.6.0
+numexpr>=2.14.1
+mplfinance>=0.12.10 # For World-Class Visuals
+
+# --- TIER 1: Market Data (3-Tier Redundancy) ---
+dhanhq==2.0.2
+nselib==2.4.2
+nsepython==2.97
+yfinance>=1.1.0
+nsepy>=0.8          # Legacy Fallback
+pandas-datareader>=0.10.0
+
+# --- TIER 2: Technical Analysis & Math ---
+# ⚠️ TA-Lib requires manual installation on Windows. 
+# Download the .whl for Python 3.12 from: https://github.com/cgohlke/talib-build/releases
+# Then run: pip install TA_Lib-0.4.32-cp312-cp312-win_amd64.whl
+# ta-lib>=0.6.0
+pandas-ta>=0.3.14b0
+ta>=0.11.0          # Pure Python fallback
+tapy>=1.11.0        # Technical Analysis in Python
+scikit-learn>=1.6.1
+vaderSentiment>=3.3.2 # Sentiment Analysis NLP
+statsmodels>=0.14.0   # Statistical Models for Arbitrage
+
+# --- TIER 3: Automation & Scraping (The "Silent Scraper") ---
+selenium==4.40.0
+chromedriver-autoinstaller==0.6.4
+urllib3==2.6.3
+requests==2.32.5
+aiohttp==3.11.11
+websockets==14.1
+websocket-client==1.8.0
+pyOpenSSL==25.3.0
+
+# --- TIER 4: Excel Integration & Reporting ---
+xlwings==0.33.20
+xlsxwriter==3.2.9
+openpyxl==3.1.5
+xlrd==2.0.2
+
+# --- TIER 5: Advanced Logging & Monitoring ---
+loguru==0.7.3
+structlog==25.1.0
+
+# --- TIER 6: Backtesting Frameworks ---
+vectorbt>=0.26.2
+backtesting>=0.3.3
+nautilus_trader>=1.218.0
+backtrader==1.9.78.123
+bt==0.2.9
+plotly>=6.0.0       # Required for interactive charts
+
+# --- Infrastructure & Utilities ---
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 python-dotenv==1.0.1
-requests==2.32.3
-websockets==14.1
-aiohttp==3.11.11
-pandas==2.2.3
-numpy==2.2.1
+redis==5.0.1
+winloop>=0.1.7          # High-Performance Event Loop for Windows
+python-dateutil==2.9.0
+pytz==2023.3
+
+# --- Deployment & Packaging ---
+auto-py-to-exe==2.48.1
+
+# ============================================================================
+# INSTALLATION NOTES:
+# 1. Windows: pip install --upgrade pip
+# 2. TA-Lib: If "pip install ta-lib" fails, use pre-built .whl from 
+#    https://github.com/cgohlke/talib-build/releases
+# ============================================================================

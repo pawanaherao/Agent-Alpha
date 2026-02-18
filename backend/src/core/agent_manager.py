@@ -82,7 +82,7 @@ class AgentManager:
     async def run_cycle(self):
         """
         Execute one full 3-minute orchestration cycle.
-        Now uses REAL NSE data via nselib.
+        Now uses REAL NSE data via yfinance/DhanHQ.
         """
         if not self.is_running:
             logger.warning("AgentManager not running. Skipping cycle.")

@@ -1,6 +1,43 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database Service
+  postgres:
+    image: postgres:15-alpine
+    container_name: agent-alpha-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password_dev_local
+      POSTGRES_DB: agentic_alpha
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - agent-alpha-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache Service
+  redis:
+    image: redis:7-alpine
+    container_name: agent-alpha-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - agent-alpha-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Frontend Service (Next.js)
   frontend:
     build:
@@ -9,7 +46,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
     depends_on:
       - backend
     networks:
@@ -21,16 +58,32 @@ services:
       context: ./backend
     container_name: agent-alpha-backend
     ports:
-      - "5000:5000"
+      - "8000:8000"
     environment:
-      - ENV=production
+      - ENV=development
       - PYTHONUNBUFFERED=1
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password_dev_local
+      - POSTGRES_DB=agentic_alpha
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     volumes:
-      - ./backend/data:/app/data # Persist data
-      - ./backend/logs:/app/logs # Persist logs
+      - ./backend:/app
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - agent-alpha-net
 
 networks:
   agent-alpha-net:
     driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

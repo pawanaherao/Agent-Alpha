@@ -10,9 +10,10 @@ Features:
 5. Daily loss limits (kill switch)
 """
 
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
+import numpy as np
+from scipy import stats
 
 from src.agents.base import BaseAgent
 from src.core.config import settings
@@ -60,6 +61,7 @@ class RiskAgent(BaseAgent):
         # Current positions (simplified)
         self.open_positions: Dict[str, Dict] = {}
         self.sector_exposure: Dict[str, float] = {}
+        self.price_history: Dict[str, pd.Series] = {} # For correlation
         
         self.nse_service = nse_data_service
         
@@ -108,7 +110,27 @@ class RiskAgent(BaseAgent):
                 original_signal_id=signal_id
             )
         
-        # 3. Calculate risk per share
+        # 3. Correlation Risk Check (Phase 4)
+        correlation_risk = await self._calculate_correlation_risk(symbol)
+        if correlation_risk > 0.7:
+            logger.warning(f"Correlation too high for {symbol}: {correlation_risk:.2f}")
+            return RiskDecision(
+                decision="REJECTED",
+                reason=f"Correlation {correlation_risk:.2f} with portfolio exceeds 0.7",
+                original_signal_id=signal_id
+            )
+
+        # 4. VaR Check (Phase 4)
+        var_value = await self._calculate_var(symbol, entry_price)
+        if var_value > self.total_capital * 0.02: # Max 2% capital at risk per VaR
+            logger.warning(f"VaR too high for {symbol}: {var_value:.0f}")
+            return RiskDecision(
+                decision="REJECTED",
+                reason=f"VaR {var_value:.0f} exceeds 2% capital limit",
+                original_signal_id=signal_id
+            )
+
+        # 5. Calculate risk per share
         if entry_price > 0 and stop_loss > 0:
             risk_per_share = abs(entry_price - stop_loss)
             reward_per_share = abs(target_price - entry_price) if target_price else risk_per_share * 2
@@ -211,6 +233,61 @@ class RiskAgent(BaseAgent):
             for pos in self.open_positions.values()
         )
         return total_at_risk / self.total_capital if self.total_capital > 0 else 0
+    
+    async def _calculate_correlation_risk(self, symbol: str) -> float:
+        """
+        Calculate correlation of new symbol with existing portfolio.
+        Enforces diversification.
+        """
+        if not self.open_positions:
+            return 0.0
+            
+        try:
+            # Fetch returns for new symbol
+            df_new = await self.nse_service.get_stock_ohlc(symbol, period="3M")
+            if df_new.empty: return 0.5 # Neutral fallback
+            
+            returns_new = df_new['close'].pct_change().dropna()
+            
+            correlations = []
+            for existing_symbol in self.open_positions.keys():
+                df_ext = await self.nse_service.get_stock_ohlc(existing_symbol, period="3M")
+                if not df_ext.empty:
+                    returns_ext = df_ext['close'].pct_change().dropna()
+                    # Align indices
+                    combined = pd.concat([returns_new, returns_ext], axis=1).dropna()
+                    if len(combined) > 20:
+                        corr = combined.corr().iloc[0, 1]
+                        correlations.append(corr)
+            
+            return max(correlations) if correlations else 0.0
+            
+        except Exception as e:
+            logger.debug(f"Correlation calculation failed: {e}")
+            return 0.5
+
+    async def _calculate_var(self, symbol: str, price: float) -> float:
+        """
+        Calculate Value-at-Risk (95% confidence) for the position.
+        """
+        try:
+            df = await self.nse_service.get_stock_ohlc(symbol, period="3M")
+            if df.empty: return 0.0
+            
+            returns = df['close'].pct_change().dropna()
+            sigma = returns.std()
+            
+            # Parametric VaR (95% confidence = 1.645 sigma)
+            var_pct = 1.645 * sigma
+            
+            # Position value is max possible size for this agent
+            max_pos_value = self.total_capital * self.max_position_size_pct
+            
+            return max_pos_value * var_pct
+            
+        except Exception as e:
+            logger.debug(f"VaR calculation failed: {e}")
+            return 0.0
     
     async def _get_vix_multiplier(self) -> float:
         """

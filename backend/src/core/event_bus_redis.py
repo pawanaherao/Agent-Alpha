@@ -34,6 +34,11 @@ class RedisEventBus:
             await self.pub_client.ping()
             self.is_connected = True
             
+            # B22 fix: Subscribe to all channels that were registered before connect()
+            for event_type in self.subscribers:
+                await self.pubsub.subscribe(event_type)
+                logger.debug(f"Redis channel subscribed: {event_type}")
+            
             # Start listener loop
             self.listen_task = asyncio.create_task(self._listener())
             logger.info(f"Redis Event Bus connected to {self.redis_url} 🚀")
@@ -52,18 +57,20 @@ class RedisEventBus:
             await self.sub_client.close()
         self.is_connected = False
 
-    async def subscribe(self, event_type: str, callback: Callable[[Dict[str, Any]], Awaitable[None]]):
+    def subscribe(self, event_type: str, callback: Callable[[Dict[str, Any]], Awaitable[None]]):
         """
         Subscribe a callback function to an event type.
+        B22 fix: Made sync (like in-memory EventBus) — Redis channel subscription
+        is lazy and happens on first publish or when connect() runs.
         """
         if event_type not in self.subscribers:
             self.subscribers[event_type] = []
             
         self.subscribers[event_type].append(callback)
         
-        if self.is_connected:
-            await self.pubsub.subscribe(event_type)
-            logger.info(f"Subscribed to Redis channel: {event_type}")
+        # Note: actual Redis channel subscription is deferred to connect()
+        # or first publish, since subscribe() must be sync to match EventBus API.
+        logger.debug(f"Registered subscriber for Redis channel: {event_type}")
 
     async def publish(self, event_type: str, data: Dict[str, Any]):
         """

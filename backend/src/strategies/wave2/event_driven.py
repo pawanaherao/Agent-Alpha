@@ -169,6 +169,12 @@ class GapFillStrategy(BaseStrategy):
             if abs(gap_pct) < self.min_gap_pct or abs(gap_pct) > self.max_gap_pct:
                 return None
             
+            # B16 fix: Volume confirmation (documented but was not enforced)
+            avg_volume = float(market_data['volume'].iloc[-20:].mean()) if len(market_data) >= 20 else float(market_data['volume'].mean())
+            current_volume = float(market_data['volume'].iloc[-1])
+            if avg_volume > 0 and current_volume < avg_volume * self.volume_confirm:
+                return None
+            
             signal_type = None
             
             if gap_pct > 0:  # Gap up - expect fill down

@@ -151,6 +151,9 @@ class EMACrossoverStrategy(BaseStrategy):
             
             # Calculate stops
             stop_loss = current_price * (1 - self.stop_loss_pct)
+            # B15 fix: target_price based on 1.5:1 R:R from stop distance
+            risk = current_price - stop_loss
+            target_price = current_price + (risk * 1.5)
             
             strength = 0.65
             if adx_valid:
@@ -167,6 +170,7 @@ class EMACrossoverStrategy(BaseStrategy):
                 market_regime_at_signal=regime,
                 entry_price=current_price,
                 stop_loss=stop_loss,
+                target_price=target_price,
                 metadata={
                     "strategy_id": self.STRATEGY_ID,
                     "segment": "CASH",

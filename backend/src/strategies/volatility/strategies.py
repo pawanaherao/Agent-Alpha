@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any
 import pandas as pd
 import numpy as np
+from datetime import datetime
 from src.strategies.base import BaseStrategy, StrategySignal
 
 class LongStraddle(BaseStrategy):
@@ -36,15 +37,18 @@ class LongStraddle(BaseStrategy):
             
             # Signal when expecting volatility increase
             if regime == "VOLATILE" and atr_pct > 2:
+                _sym = market_data['symbol'].iloc[-1] if 'symbol' in market_data.columns else 'NIFTY'
                 return StrategySignal(
-                    entry_type="LONG_STRADDLE",
-                    symbol=market_data.get('symbol', 'NIFTY'),
-                    direction="BUY",
+                    signal_id=f"STRADDLE_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
+                    symbol=_sym,
+                    signal_type="BUY",
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
                     quantity=1,
-                    confidence=78,
+                    strength=0.78,
                     stop_loss=current_close - (atr * self.atr_multiplier),
-                    target=current_close + (atr * self.atr_multiplier * 1.5),
+                    target_price=current_close + (atr * self.atr_multiplier * 1.5),
                     metadata={
                         "strategy_type": "long_straddle",
                         "strike": round(current_close),
@@ -53,6 +57,7 @@ class LongStraddle(BaseStrategy):
                             round(current_close - atr),
                             round(current_close + atr)
                         ],
+                        "entry_type": "LONG_STRADDLE",
                         "vol_expectation": "expansion",
                         "time_decay_risk": True,
                     }
@@ -100,40 +105,46 @@ class VIXTrading(BaseStrategy):
             # Signal when volatility is expanding (long VIX proxy)
             if recent_vol > prior_vol * 1.2 and recent_vol > self.vol_threshold:
                 return StrategySignal(
-                    entry_type="LONG_VIX",
+                    signal_id=f"VIX_LONG_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
                     symbol="VIX",
-                    direction="BUY",
+                    signal_type="BUY",
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
                     quantity=1,
-                    confidence=70,
+                    strength=0.70,
                     stop_loss=current_close - (current_close * 0.1),
-                    target=current_close + (current_close * 0.15),
+                    target_price=current_close + (current_close * 0.15),
                     metadata={
                         "strategy_type": "vix_trading",
                         "volatility_direction": "expansion",
                         "recent_vol_pct": round(recent_vol, 2),
                         "vol_change": round(((recent_vol/prior_vol - 1) * 100), 2),
                         "regime": regime,
+                        "entry_type": "LONG_VIX",
                         "hedge_benefit": "Portfolio protection"
                     }
                 )
             # Signal when volatility is contracting (short VIX proxy)
             elif prior_vol > recent_vol * 1.2 and regime in ["BULL", "SIDEWAYS"]:
                 return StrategySignal(
-                    entry_type="SHORT_VIX",
+                    signal_id=f"VIX_SHORT_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
                     symbol="VIX",
-                    direction="SELL",
+                    signal_type="SELL",
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
                     quantity=1,
-                    confidence=70,
+                    strength=0.70,
                     stop_loss=current_close + (current_close * 0.12),
-                    target=current_close - (current_close * 0.1),
+                    target_price=current_close - (current_close * 0.1),
                     metadata={
                         "strategy_type": "vix_trading",
                         "volatility_direction": "contraction",
                         "recent_vol_pct": round(recent_vol, 2),
                         "vol_change": round(((recent_vol/prior_vol - 1) * 100), 2),
                         "regime": regime,
+                        "entry_type": "SHORT_VIX",
                         "profit_from": "Vol crush"
                     }
                 )

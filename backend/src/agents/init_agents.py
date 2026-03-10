@@ -15,6 +15,21 @@ from src.agents.strategy import StrategyAgent
 
 # Wave 1 Strategies
 from src.strategies.momentum.orb import ORBStrategy
+
+# Wave 3 / Phase 6 Strategies (imported here for the factory)
+try:
+    from src.strategies.quant.statistical_arbitrage import StatisticalArbitrageStrategy
+    from src.strategies.quant.volatility_arbitrage import VolatilityArbitrageStrategy
+    from src.strategies.quant.momentum import CrossSectionalMomentumStrategy
+except ImportError:
+    StatisticalArbitrageStrategy = None
+    VolatilityArbitrageStrategy = None
+    CrossSectionalMomentumStrategy = None
+
+try:
+    from src.strategies.universal_strategy import UniversalStrategy
+except ImportError:
+    UniversalStrategy = None
 from src.strategies.multileg.iron_condor import IronCondorStrategy
 from src.strategies.mean_reversion.vwap import VWAPReversionStrategy
 from src.strategies.spreads.bull_call_spread import BullCallSpreadStrategy
@@ -103,19 +118,60 @@ async def initialize_strategy_agent(config: Dict[str, Any]) -> StrategyAgent:
     await agent.register_strategy(VolatilityCrushStrategy())
     
     # === WAVE 3 STRATEGIES (Phase 6 - Institutional) ===
-    
-    # 17. Statistical Arbitrage (Pairs)
-    await agent.register_strategy(StatisticalArbitrageStrategy())
-    
-    # 18. Volatility Arbitrage
-    await agent.register_strategy(VolatilityArbitrageStrategy())
-    
-    # 19. Cross-Sectional Momentum
-    await agent.register_strategy(CrossSectionalMomentumStrategy())
 
-    # 20. Universal Strategy (Phase 7 - No-Code Builder)
-    # Note: Config will be injected at runtime by the Builder API
-    await agent.register_strategy(UniversalStrategy())
+    # 17-20. Optional Wave 3 / Universal strategies
+    if StatisticalArbitrageStrategy is not None:
+        await agent.register_strategy(StatisticalArbitrageStrategy())
+    if VolatilityArbitrageStrategy is not None:
+        await agent.register_strategy(VolatilityArbitrageStrategy())
+    if CrossSectionalMomentumStrategy is not None:
+        await agent.register_strategy(CrossSectionalMomentumStrategy())
+    if UniversalStrategy is not None:
+        # ── Equity mode (explicit config — avoids defaulting to empty dict) ──
+        equity_strategy = UniversalStrategy({
+            "mode": "equity",
+            "stop_loss_pct": 1.5,
+            "take_profit_pct": 3.0,
+        })
+        equity_strategy.name = "UniversalStrategy_Equity"
+        await agent.register_strategy(equity_strategy)
+
+        # ── Options mode instances (one per supported structure) ──
+        # Each gets regime-context and structure at scan time via chain_data injection.
+        options_configs = [
+            {
+                "strategy_name": "UniversalStrategy_BullCallSpread",
+                "mode": "options",
+                "structure": "BULL_CALL_SPREAD",
+                "options_config": {
+                    "wing_width": 100,   # strike distance in rupees
+                    "short_delta": 0.35,
+                    "expiry_type": "WEEKLY",
+                },
+            },
+            {
+                "strategy_name": "UniversalStrategy_BearPutSpread",
+                "mode": "options",
+                "structure": "BEAR_PUT_SPREAD",
+                "options_config": {
+                    "wing_width": 100,
+                    "short_delta": 0.35,
+                    "expiry_type": "WEEKLY",
+                },
+            },
+            {
+                "strategy_name": "UniversalStrategy_Straddle",
+                "mode": "options",
+                "structure": "STRADDLE",
+                "options_config": {
+                    "expiry_type": "WEEKLY",
+                },
+            },
+        ]
+        for ocfg in options_configs:
+            strat = UniversalStrategy(ocfg)
+            strat.name = ocfg["strategy_name"]
+            await agent.register_strategy(strat)
     
     # === LEGACY (For Comparison) ===
     await agent.register_strategy(VWAPBounceStrategy())

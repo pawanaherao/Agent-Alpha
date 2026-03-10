@@ -14,16 +14,11 @@ def calculate_hurst_exponent(time_series):
     lags = range(2, 20)
     tau = [np.sqrt(np.std(np.subtract(time_series[lag:], time_series[:-lag]))) for lag in lags]
     
-    # Polyfit logic in pure numpy/numba
     # Log-Log plot
     y = np.log(np.array(tau))
     x = np.log(np.array(list(lags)))
     
-    # Linear regression: y = mx + c
-    A = np.vstack((x, np.ones(len(x)))).T
-    # Numba doesn't support np.linalg.lstsq perfectly in nopython mode sometimes,
-    # so we implement simple linear regression manually for speed
-    
+    # Manual linear regression (numba nopython compatible).
     n = len(x)
     sum_x = np.sum(x)
     sum_y = np.sum(y)

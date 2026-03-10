@@ -146,16 +146,17 @@ class NSEDataService:
             ticker_symbol = self.index_map.get(index, "^NSEI")
             ticker = yf.Ticker(ticker_symbol)
             
-            # Map period to yfinance format
-            # yfinance periods: 1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max
-            yf_period = period.lower().replace("m", "mo") 
-            if yf_period == "1mo": yf_period = "1mo"
-            elif yf_period == "3mo": yf_period = "3mo"
-            elif yf_period == "6mo": yf_period = "6mo"
-            elif yf_period == "1y": yf_period = "1y"
-            elif yf_period == "3y": yf_period = "5y" # Approximate
-            elif yf_period == "5y": yf_period = "5y"
-            else: yf_period = "1mo" # Default
+            # B26 fix: Explicit period mapping (no fragile string replace)
+            _YF_PERIOD_MAP = {
+                "1d": "1d", "5d": "5d",
+                "1m": "1mo", "1mo": "1mo",
+                "3m": "3mo", "3mo": "3mo",
+                "6m": "6mo", "6mo": "6mo",
+                "1y": "1y", "2y": "2y",
+                "3y": "5y", "5y": "5y",
+                "10y": "10y", "ytd": "ytd", "max": "max",
+            }
+            yf_period = _YF_PERIOD_MAP.get(period.lower(), "1mo")
             
             logger.info(f"Attempting Tier 3 (yfinance) for index {index} ({ticker_symbol}) period={yf_period}")
             
@@ -229,14 +230,17 @@ class NSEDataService:
             ticker_symbol = f"{symbol}.NS"
             ticker = yf.Ticker(ticker_symbol)
             
-            yf_period = period.lower().replace("m", "mo")
-            if yf_period == "1mo": yf_period = "1mo"
-            elif yf_period == "3mo": yf_period = "3mo"
-            elif yf_period == "6mo": yf_period = "6mo"
-            elif yf_period == "1y": yf_period = "1y"
-            elif yf_period == "3y": yf_period = "5y"
-            elif yf_period == "5y": yf_period = "5y"
-            else: yf_period = "1y"
+            # B26 fix: Explicit period mapping
+            _YF_PERIOD_MAP = {
+                "1d": "1d", "5d": "5d",
+                "1m": "1mo", "1mo": "1mo",
+                "3m": "3mo", "3mo": "3mo",
+                "6m": "6mo", "6mo": "6mo",
+                "1y": "1y", "2y": "2y",
+                "3y": "5y", "5y": "5y",
+                "10y": "10y", "ytd": "ytd", "max": "max",
+            }
+            yf_period = _YF_PERIOD_MAP.get(period.lower(), "1y")
             
             logger.info(f"Attempting Tier 3 (yfinance) for stock {symbol} ({ticker_symbol})")
             
@@ -330,18 +334,44 @@ class NSEDataService:
             calls = chain.calls
             puts = chain.puts
             
-            # Combine into a simpler format consistent with previous nselib usage
-            # We focus on getting strike prices and latest prices
-            
             # Get spot price
             hist = ticker.history(period="1d")
             spot = float(hist['Close'].iloc[-1]) if not hist.empty else 0
+            
+            # B08 fix: Parse calls and puts into a structured data list
+            option_data = []
+            for _, row in calls.iterrows():
+                option_data.append({
+                    "strike": float(row.get("strike", 0)),
+                    "option_type": "CE",
+                    "expiry": str(expirations[0]),
+                    "last_price": float(row.get("lastPrice", 0)),
+                    "bid": float(row.get("bid", 0)),
+                    "ask": float(row.get("ask", 0)),
+                    "volume": int(row.get("volume", 0)),
+                    "open_interest": int(row.get("openInterest", 0)),
+                    "implied_volatility": float(row.get("impliedVolatility", 0)),
+                    "in_the_money": bool(row.get("inTheMoney", False)),
+                })
+            for _, row in puts.iterrows():
+                option_data.append({
+                    "strike": float(row.get("strike", 0)),
+                    "option_type": "PE",
+                    "expiry": str(expirations[0]),
+                    "last_price": float(row.get("lastPrice", 0)),
+                    "bid": float(row.get("bid", 0)),
+                    "ask": float(row.get("ask", 0)),
+                    "volume": int(row.get("volume", 0)),
+                    "open_interest": int(row.get("openInterest", 0)),
+                    "implied_volatility": float(row.get("impliedVolatility", 0)),
+                    "in_the_money": bool(row.get("inTheMoney", False)),
+                })
             
             result = {
                 "symbol": symbol,
                 "spot_price": spot,
                 "expiry_dates": list(expirations),
-                "data": [] # Simplified for now, real usage might need detailed parsing
+                "data": option_data
             }
             
             # Cache (shorter TTL for options)
@@ -385,8 +415,71 @@ class NSEDataService:
         ]
     
     def get_fno_stocks(self) -> List[str]:
+        """Return all NSE F&O eligible stocks (SEBI ban-list approved, ~150+ names).
+
+        This list reflects the NSE F&O segment as of 2025 and is used by
+        OptionChainScannerAgent and ScannerAgent universe expansion.
+        Lot sizes and expiry types are maintained in option_chain.py.
+        """
         return [
-            "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "KOTAKBANK"
+            # ── Indices (handled separately – listed here for completeness) ──
+            # "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",   # use INDEX_OPTIONS_UNIVERSE
+
+            # ── Banking & Finance ──
+            "HDFCBANK", "ICICIBANK", "AXISBANK", "KOTAKBANK", "SBIN", "INDUSINDBK",
+            "FEDERALBNK", "IDFCFIRSTB", "PNB", "CANBK", "BANKBARODA", "UNIONBANK",
+            "BAJFINANCE", "BAJAJFINSV", "MUTHOOTFIN", "CHOLAFIN", "M&MFIN",
+            "HDFCLIFE", "SBILIFE", "ICICIGI", "ICICIPRULI", "LICI",
+
+            # ── IT & Technology ──
+            "TCS", "INFY", "WIPRO", "HCLTECH", "TECHM", "LTIM", "MPHASIS",
+            "COFORGE", "PERSISTENT", "OFSS",
+
+            # ── Energy & Power ──
+            "RELIANCE", "ONGC", "NTPC", "POWERGRID", "TATAPOWER", "ADANIGREEN",
+            "ADANIPORTS", "ADANIENT", "ADANIPOWER", "CESC", "TORNTPOWER",
+
+            # ── FMCG ──
+            "HINDUNILVR", "ITC", "NESTLEIND", "BRITANNIA", "DABUR",
+            "MARICO", "COLPAL", "TATACONSUM", "GODREJCP",
+
+            # ── Automobile ──
+            "MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "HEROMOTOCO",
+            "EICHERMOT", "ASHOKLEY", "BALKRISIND", "MRF",
+
+            # ── Pharma & Healthcare ──
+            "SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "LUPIN",
+            "AUROPHARMA", "BIOCON", "ALKEM", "GLENMARK", "IPCALAB",
+            "APOLLOHOSP", "FORTIS", "MAXHEALTH",
+
+            # ── Metals & Mining ──
+            "TATASTEEL", "HINDALCO", "JSWSTEEL", "SAIL", "VEDL",
+            "NATIONALUM", "NMDC", "COAL INDIA",
+
+            # ── Capital Goods / Industrials ──
+            "LT", "SIEMENS", "ABB", "BEL", "HAL", "BHEL",
+            "RVNL", "IRFC", "IRCTC",
+
+            # ── Telecom ──
+            "BHARTIARTL", "VODAIDEALT",
+
+            # ── Cement ──
+            "ULTRACEMCO", "SHREECEM", "AMBUJACEM", "ACC",
+
+            # ── Real Estate ──
+            "DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE", "PHOENIXLTD",
+            "SOBHA", "BRIGADE",
+
+            # ── Consumer Durables / Retail ──
+            "TITAN", "TRENT", "DMART", "NYKAA", "ZOMATO", "PAYTM",
+
+            # ── Others / Large-caps ──
+            "ASIANPAINT", "BERGERPAINTS", "PIDILITIND",
+            "SRF", "AARTIIND", "DEEPAKNTR",
+            "ESCORTS", "SYNGENE", "ASTRAL",
+            "POLYCAB", "HAVELLS", "DIXON",
+            "INDIGO", "SPICEJET",
+            "MANAPPURAM", "IIFL", "ANGELONE", "BSE",
         ]
     
     # ==================== TECHNICAL INDICATORS ====================

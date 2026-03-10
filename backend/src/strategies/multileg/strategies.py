@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any
 import pandas as pd
 import numpy as np
+from datetime import datetime
 from src.strategies.base import BaseStrategy, StrategySignal
 
 class IronCondor(BaseStrategy):
@@ -34,15 +35,18 @@ class IronCondor(BaseStrategy):
             
             # Signal in balanced sideways market
             if regime == "SIDEWAYS" and range_width > 0:
+                _sym = market_data['symbol'].iloc[-1] if 'symbol' in market_data.columns else 'NIFTY'
                 return StrategySignal(
-                    entry_type="IRON_CONDOR",
-                    symbol=market_data.get('symbol', 'NIFTY'),
-                    direction="SELL",
+                    signal_id=f"CONDOR_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
+                    symbol=_sym,
+                    signal_type="SELL",
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
                     quantity=1,
-                    confidence=80,
+                    strength=0.80,
                     stop_loss=recent_high + (range_width * 0.25),
-                    target=mid_point,
+                    target_price=mid_point,
                     metadata={
                         "strategy_type": "iron_condor",
                         "put_short": round(mid_point - (range_width * 0.5)),
@@ -83,15 +87,18 @@ class ButterflySpread(BaseStrategy):
             
             # Signal when volatility is moderate (good butterfly conditions)
             if regime == "SIDEWAYS" and volatility < (current_close * 0.03):
+                _sym = market_data['symbol'].iloc[-1] if 'symbol' in market_data.columns else 'NIFTY'
                 return StrategySignal(
-                    entry_type="BUTTERFLY",
-                    symbol=market_data.get('symbol', 'NIFTY'),
-                    direction="BUY",
+                    signal_id=f"BUTTERFLY_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
+                    symbol=_sym,
+                    signal_type="BUY",
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
                     quantity=1,
-                    confidence=75,
+                    strength=0.75,
                     stop_loss=current_close + (self.spread_width * 0.5),
-                    target=current_close,
+                    target_price=current_close,
                     metadata={
                         "strategy_type": "butterfly_spread",
                         "bottom_strike": round(current_close - self.spread_width),
@@ -132,15 +139,18 @@ class LongStrangle(BaseStrategy):
             
             # Signal when expecting volatility expansion
             if regime == "VOLATILE" and recent_volatility > 0:
+                _sym = market_data['symbol'].iloc[-1] if 'symbol' in market_data.columns else 'NIFTY'
                 return StrategySignal(
-                    entry_type="LONG_STRANGLE",
-                    symbol=market_data.get('symbol', 'NIFTY'),
-                    direction="BUY",
+                    signal_id=f"STRANGLE_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
+                    symbol=_sym,
+                    signal_type="BUY",
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
                     quantity=1,
-                    confidence=75,
+                    strength=0.75,
                     stop_loss=current_close - (self.strangle_width * 0.5),
-                    target=current_close + (self.strangle_width * 0.75),
+                    target_price=current_close + (self.strangle_width * 0.75),
                     metadata={
                         "strategy_type": "long_strangle",
                         "call_strike": round(current_close + self.strangle_width),

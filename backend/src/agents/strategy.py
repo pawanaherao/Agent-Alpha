@@ -48,6 +48,15 @@ class StrategyAgent(BaseAgent):
     def __init__(self, name: str = "StrategyAgent", config: Dict[str, Any] = None):
         super().__init__(name, config)
         self.strategies: Dict[str, BaseStrategy] = {}
+
+        # ── Intra-cycle caches (refreshed on each sensing event) ──────────────
+        # Keyed by symbol → full scan result from ScannerAgent (avoids re-fetch)
+        self._scan_cache: Dict[str, Any] = {}
+        # Keyed by symbol → scored options chain opportunity from OptionChainScannerAgent
+        self._options_chain_cache: Dict[str, Any] = {}
+        # Latest sentiment/regime pushed from sensing events
+        self._latest_sentiment: float = 0.0
+        self._latest_regime: str = "SIDEWAYS"
         self.nse_service = nse_data_service
         
         # Strategy weights by regime
@@ -97,7 +106,61 @@ class StrategyAgent(BaseAgent):
         """Register a strategy instance."""
         self.strategies[strategy.name] = strategy
         logger.info(f"Registered strategy: {strategy.name}")
-    
+
+    # ── Sensing-event subscribers ──────────────────────────────────────────────
+
+    async def on_scan_complete(self, data: Dict[str, Any]):
+        """
+        Cache full scanner results so select_and_execute() can skip the
+        duplicate get_stock_with_indicators() call for each symbol.
+        This is the primary fix for the 10-trades/second bottleneck: the
+        scanner already fetched OHLCV + computed all 12 indicators; we
+        inject those scalar values into the DataFrame instead of re-fetching.
+        """
+        scanned: list = data.get("scanned", [])
+        self._scan_cache = {s["symbol"]: s for s in scanned if "symbol" in s}
+        # Propagate regime hint from scanner
+        if data.get("regime"):
+            self._latest_regime = data["regime"]
+        logger.debug(f"StrategyAgent: scan cache updated — {len(self._scan_cache)} symbols")
+
+    async def on_sentiment_updated(self, data: Dict[str, Any]):
+        """Cache latest sentiment score published by SentimentAgent."""
+        self._latest_sentiment = float(data.get("score", self._latest_sentiment))
+        logger.debug(f"StrategyAgent: sentiment → {self._latest_sentiment:.2f} "
+                     f"({data.get('classification', '')})")
+
+    async def on_regime_updated(self, data: Dict[str, Any]):
+        """Cache latest regime published by RegimeAgent."""
+        self._latest_regime = data.get("regime", self._latest_regime)
+        logger.debug(f"StrategyAgent: regime → {self._latest_regime} "
+                     f"(stat={data.get('statistical_regime', '')}, vix={data.get('vix', '')})")
+    async def on_options_scan_complete(self, data: Dict[str, Any]):
+        """
+        Cache option chain scan results published by OptionChainScannerAgent.
+
+        Payload structure (per OPTIONS_SCAN_COMPLETE event):
+          {
+            "chains": [
+              {"symbol": str, "structure": str, "score": float,
+               "iv_rank": float, "atm_iv": float, "oi_pcr": float,
+               "atm_strike": float, "spot_price": float, "expiry": str,
+               "lot_size": int, "legs": [...]},
+              ...
+            ],
+            "regime": str, "count": int, "timestamp": str
+          }
+        Update _latest_regime from the scan's regime hint as well.
+        """
+        chains: list = data.get("chains", [])
+        self._options_chain_cache = {opp["symbol"]: opp for opp in chains if "symbol" in opp}
+        if data.get("regime"):
+            self._latest_regime = data["regime"]
+        logger.info(
+            f"StrategyAgent: options chain cache updated \u2014 "
+            f"{len(self._options_chain_cache)} symbols, "
+            f"top={next(iter(self._options_chain_cache), 'none')}"
+        )    
     async def select_and_execute(
         self, 
         regime: str, 
@@ -105,113 +168,162 @@ class StrategyAgent(BaseAgent):
         opportunities: List[str]
     ):
         """
-        Enhanced strategy execution with real data.
-        
+        Enhanced strategy execution with parallel data fetch + scanner cache.
+
+        PERFORMANCE PATH (10-trade/s target):
+        ┌──────────────┐   SCAN_COMPLETE   ┌────────────────────┐
+        │  ScannerAgent │ ──────────────── ▶│  _scan_cache       │
+        └──────────────┘  (indicators pre- │  {symbol: scan_row}│
+                           computed)        └────────┬───────────┘
+                                                     │ inject scalars
+                                                     ▼
+        ┌──────────────────────────────────────────────────────────┐
+        │  asyncio.gather(*fetch_tasks)  ← PARALLEL DATA FETCH    │
+        │  For each symbol:                                        │
+        │    cache hit  → get_stock_ohlc() + inject scan scalars  │
+        │    cache miss → get_stock_with_indicators()  (fallback) │
+        └────────────────────────┬─────────────────────────────────┘
+                                 ▼
+        ┌──────────────────────────────────────────────────────────┐
+        │  asyncio.gather(*signal_tasks) ← PARALLEL SIGNAL GEN    │
+        │  top-3 strategies × each symbol                         │
+        └──────────────────────────────────────────────────────────┘
+
         WHITEBOX LOGIC:
-        1. Filter strategies by regime (suitability > 50)
-        2. Apply regime weights
-        3. Fetch real NSE data for each symbol
-        4. Generate signals
+        1. Filter strategies by regime suitability
+        2. Pre-filter symbols: skip scanner score < 50 to reduce load
+        3. Parallel OHLCV fetch (inject pre-computed scanner indicators)
+        4. Parallel signal generation
         5. Validate with GenAI (if enabled)
         6. Publish approved signals
         """
-        logger.info(f"Strategy selection: Regime={regime}, Sentiment={sentiment:.1f}, Opps={len(opportunities)}")
-        
+        logger.info(f"Strategy selection: Regime={regime}, Sentiment={sentiment:.1f}, "
+                    f"Opps={len(opportunities)}")
+
+        # Allow callers that pass raw string lists (legacy) as well as dicts
+        def _sym(opp) -> str:
+            return opp["symbol"] if isinstance(opp, dict) else str(opp)
+
         # 1. Filter strategies by regime suitability
         suitable_strategies = await self._filter_by_regime(regime)
-        
         if not suitable_strategies:
             logger.warning("No suitable strategies for current regime")
             return
-        
+
         logger.info(f"Suitable strategies: {[s[0].name for s in suitable_strategies]}")
-        
-        # 2. Generate signals for each opportunity
-        generated_signals = []
-        
-        for symbol in opportunities[:10]:  # Limit to top 10 opportunities
+
+        # 2. Pre-filter using scanner scores — avoid fetching data for weak setups
+        qualified: list = []
+        for opp in opportunities[:10]:
+            symbol = _sym(opp)
+            cached = self._scan_cache.get(symbol)
+            scanner_score = cached.get("score", 100) if cached else 100
+            if scanner_score >= 50:
+                qualified.append((symbol, cached))
+            else:
+                logger.debug(f"Pre-filter: skipping {symbol} (scan_score={scanner_score:.0f})")
+
+        if not qualified:
+            logger.info("No qualified opportunities after scanner pre-filter")
+            return
+
+        # 3. PARALLEL data fetch — scanner cache hit avoids redundant indicator recalc
+        async def _fetch(symbol: str, cached: Optional[Any]) -> tuple:
             try:
-                # Fetch real NSE data
-                market_data = await self.nse_service.get_stock_with_indicators(
-                    symbol, period="3M"
-                )
-                
+                if cached:
+                    # Fast path: fetch OHLCV only (indicators already in cache)
+                    market_data = await self.nse_service.get_stock_ohlc(
+                        symbol, period="1Y"
+                    )
+                    if not market_data.empty:
+                        # Inject pre-computed scanner scalar indicators as extra columns
+                        for k, v in cached.get("indicators", {}).items():
+                            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                                market_data[f"scan_{k}"] = float(v)
+                        market_data["scanner_score"] = cached.get("score", 0)
+                else:
+                    # Slow path: full fetch + indicator computation (cache miss)
+                    market_data = await self.nse_service.get_stock_with_indicators(
+                        symbol, period="1Y"
+                    )
+
                 if market_data.empty:
-                    logger.debug(f"No data for {symbol}, skipping")
-                    continue
-                
-                # OPTIMIZATION (Phase 5): JIT-Compiled Fractal Check
+                    return symbol, pd.DataFrame()
+
+                market_data["symbol"] = symbol
+
+                # Hurst exponent — fractality check (Phase 5, non-blocking)
                 try:
                     from src.utils.fast_math import calculate_hurst_exponent
-                    close_prices = market_data['close'].values
-                    if len(close_prices) > 30:
-                        hurst = calculate_hurst_exponent(close_prices)
-                        market_data['hurst'] = hurst
-                        logger.debug(f"Hurst Exponent for {symbol}: {hurst:.4f}")
-                        
-                        # Fractal Filter: Skip Trend strategies if random walk (H ~ 0.5)
-                        # We store this in metadata for the strategy to decide
-                    else:
-                        market_data['hurst'] = 0.5
-                except Exception as e:
-                    logger.debug(f"Fast Math failed for {symbol}: {e}")
-                    market_data['hurst'] = 0.5
+                    close = market_data["close"].values
+                    market_data["hurst"] = (
+                        calculate_hurst_exponent(close) if len(close) > 30 else 0.5
+                    )
+                except Exception:
+                    market_data["hurst"] = 0.5
 
-                # OPTIMIZATION (Phase 5): Convert to Polars for faster checks
                 try:
-                    pl_data = pl.from_pandas(market_data)
-                    # Example: Bulk volatility/trend checks using Polars fast expressions
-                    # (This accelerates decision making before calling complex strategy logic)
-                except Exception as e:
-                    logger.debug(f"Polars conversion failed for {symbol}: {e}")
-                
-                # Add symbol to dataframe
-                market_data['symbol'] = symbol
-                
-                # Generate signals from top strategies
-                for strategy, score in suitable_strategies[:3]:
-                    try:
-                        signal = await strategy.generate_signal(market_data, regime)
-                        
-                        if signal:
-                            # Enhance signal with additional metadata
-                            signal.metadata['suitability_score'] = score
-                            signal.metadata['sentiment_score'] = sentiment
-                            signal.metadata['regime'] = regime
-                            signal.metadata['data_rows'] = len(market_data)
-                            
-                            # Calculate conviction-based position sizing
-                            signal.metadata['position_weight'] = self._calculate_position_weight(
-                                score, sentiment, signal.strength
-                            )
-                            
-                            generated_signals.append(signal)
-                            
-                            logger.info(
-                                f"Signal: {signal.signal_type} {signal.symbol} "
-                                f"from {signal.strategy_name} (strength={signal.strength:.2f})"
-                            )
-                            
-                    except Exception as e:
-                        logger.error(f"Signal generation failed for {strategy.name}: {e}")
-                        
+                    pl.from_pandas(market_data)  # type-check via polars (fast)
+                except Exception:
+                    pass
+
+                return symbol, market_data
             except Exception as e:
                 logger.error(f"Data fetch failed for {symbol}: {e}")
-        
-        # 3. GenAI validation (if enabled and signals exist)
+                return symbol, pd.DataFrame()
+
+        fetch_results: list = await asyncio.gather(
+            *[_fetch(sym, cached) for sym, cached in qualified]
+        )
+
+        # 4. PARALLEL signal generation (symbol × strategy)
+        async def _gen(symbol: str, market_data: pd.DataFrame) -> list:
+            if market_data.empty:
+                return []
+            signals = []
+            for strategy, score in suitable_strategies[:3]:
+                try:
+                    signal = await strategy.generate_signal(market_data, regime)
+                    if signal:
+                        signal.metadata["suitability_score"] = score
+                        signal.metadata["sentiment_score"] = sentiment
+                        signal.metadata["regime"] = regime
+                        signal.metadata["data_rows"] = len(market_data)
+                        signal.metadata["position_weight"] = (
+                            self._calculate_position_weight(score, sentiment, signal.strength)
+                        )
+                        signals.append(signal)
+                        logger.info(
+                            f"Signal: {signal.signal_type} {signal.symbol} "
+                            f"from {signal.strategy_name} (strength={signal.strength:.2f})"
+                        )
+                except Exception as e:
+                    logger.error(f"Signal generation failed for {strategy.name}: {e}")
+            return signals
+
+        signal_batches = await asyncio.gather(
+            *[_gen(sym, data) for sym, data in fetch_results
+              if not isinstance(data, BaseException)]
+        )
+        generated_signals: list = [s for batch in signal_batches for s in batch]
+
+        # 5. GenAI validation (if enabled and signals exist)
         if generated_signals and self.genai_model:
             generated_signals = await self._validate_with_genai(
                 generated_signals, regime, sentiment
             )
-        
-        # 4. Publish signals
+
+        # 5b. Options path — run options-mode strategies against cached chain data
+        if self._options_chain_cache:
+            options_signals = await self._run_options_strategies(regime, sentiment)
+            if options_signals:
+                generated_signals.extend(options_signals)
+                logger.info(f"Options path added {len(options_signals)} signals")
+
+        # 6. Publish signals
         if generated_signals:
             logger.info(f"Publishing {len(generated_signals)} signals")
-            
-            # Store in history
             self.signal_history.extend(generated_signals)
-            
-            # Convert to dict for serialization
             payload = [s.model_dump() for s in generated_signals]
             await self.publish_event("SIGNALS_GENERATED", {"signals": payload})
         else:
@@ -249,7 +361,90 @@ class StrategyAgent(BaseAgent):
         suitable.sort(key=lambda x: x[1], reverse=True)
         
         return suitable
-    
+
+    async def _run_options_strategies(
+        self, regime: str, sentiment: float
+    ) -> list:
+        """
+        Run all options-mode strategies against the cached option chain data.
+
+        For each opportunity in _options_chain_cache:
+          1. Build a minimal 1-row DataFrame carrying spot price + chain metrics so
+             the strategy can call option_chain_service.get_chain() internally.
+          2. Temporarily set strategy.config["symbol"] to route the right chain.
+          3. Collect and return all generated signals.
+
+        Options-mode strategies are identified by config["mode"] == "options".
+        Only strategies whose config["structure"] matches the chain's best-fit
+        structure are paired, reducing noise.
+        """
+        options_strategies = [
+            s for s in self.strategies.values()
+            if getattr(s, "config", {}).get("mode") == "options"
+        ]
+        if not options_strategies:
+            return []
+
+        results = []
+
+        for symbol, chain_opp in self._options_chain_cache.items():
+            best_structure = chain_opp.get("structure", "")
+            spot = chain_opp.get("spot_price", 0)
+            if spot <= 0:
+                continue
+
+            # Build a minimal DataFrame: single-row representation so strategies
+            # can at least pass the `market_data.empty` guard. Strategies will
+            # internally re-fetch the full chain via option_chain_service.
+            minimal_df = pd.DataFrame([{
+                "close": spot,
+                "open": spot,
+                "high": spot,
+                "low": spot,
+                "volume": 1,
+                "iv_rank": chain_opp.get("iv_rank", 50),
+                "atm_iv": chain_opp.get("atm_iv", 0),
+                "oi_pcr": chain_opp.get("oi_pcr", 1.0),
+                "options_score": chain_opp.get("score", 0),
+            }])
+            minimal_df["symbol"] = symbol
+
+            for strategy in options_strategies:
+                strat_structure = strategy.config.get("structure")
+                # Route: only run if structures match (or strategy has no structure)
+                if strat_structure and strat_structure != best_structure:
+                    continue
+
+                # Temporarily point strategy at this symbol
+                old_symbol = strategy.config.get("symbol")
+                strategy.config["symbol"] = symbol
+                try:
+                    signal = await strategy.generate_signal(minimal_df, regime)
+                    if signal:
+                        signal.metadata["options_chain_score"] = chain_opp.get("score", 0)
+                        signal.metadata["iv_rank"] = chain_opp.get("iv_rank", 0)
+                        signal.metadata["oi_pcr"] = chain_opp.get("oi_pcr", 1.0)
+                        signal.metadata["sentiment_score"] = sentiment
+                        signal.metadata["regime"] = regime
+                        signal.strategy_name = strategy.name  # tag with instance name
+                        results.append(signal)
+                        logger.info(
+                            f"Options signal: {signal.signal_type} {symbol} "
+                            f"from {strategy.name} (chain_score={chain_opp.get('score', 0):.1f})"
+                        )
+                except Exception as exc:
+                    logger.debug(
+                        f"Options strategy {strategy.name} failed for {symbol}: {exc}"
+                    )
+                finally:
+                    # Restore original symbol (or remove key if it wasn't set before)
+                    if old_symbol is None:
+                        strategy.config.pop("symbol", None)
+                    else:
+                        strategy.config["symbol"] = old_symbol
+
+        return results
+
     def _classify_strategy(self, strategy_name: str) -> str:
         """Classify strategy into type for regime weighting."""
         name_lower = strategy_name.lower()

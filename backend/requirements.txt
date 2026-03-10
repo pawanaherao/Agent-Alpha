@@ -70,11 +70,23 @@ plotly>=6.0.0       # Required for interactive charts
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
+pydantic-settings>=2.0.0    # Required for BaseSettings in core/config.py
 python-dotenv==1.0.1
 redis==5.0.1
-winloop>=0.1.7          # High-Performance Event Loop for Windows
+asyncpg>=0.29.0             # Async PostgreSQL driver for database/postgres.py
+apscheduler>=3.10.0         # 3-minute orchestration scheduler in src/main.py
+python-socketio>=5.11.0     # WebSocket support for backend/main.py
+polars>=1.0.0               # High-performance DataFrame library (strategy agent)
+pandas-ta>=0.3.14b          # Technical analysis indicators (universal_strategy)
+aiohttp>=3.9.0              # Async HTTP client for sentiment and data services
+scikit-learn>=1.4.0         # Regime classification (KMeans, ML utilities)
+winloop>=0.1.7              # High-Performance Event Loop for Windows
 python-dateutil==2.9.0
 pytz==2023.3
+
+# --- Optional Cloud / AI (install only if using GCP) ---
+# google-cloud-firestore>=2.19.0   # Uncomment if using GCP Firestore
+# google-cloud-aiplatform>=1.90.0  # Uncomment if using Vertex AI / Gemini
 
 # --- Deployment & Packaging ---
 auto-py-to-exe==2.48.1

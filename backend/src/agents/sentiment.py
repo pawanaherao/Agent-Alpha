@@ -201,19 +201,20 @@ class SentimentAgent(BaseAgent):
     
     async def _fetch_social_media(self) -> List[Dict]:
         """
-        Fetch sentiment from Social Media (X/Reddit) using Selenium.
-        PHASE 4: Selenium-based Silent Scraper
+        Fetch sentiment from Social Media (X/Reddit).
+        B24 fix: Removed hardcoded fake headlines. Returns empty list until
+        a real scraper (Selenium/API) is configured. When SOCIAL_SCRAPER_ENABLED
+        env var is set, this can be activated.
         """
         headlines = []
         try:
-            # Note: In a production environment, we'd use Nifty-specific subreddits or X search
-            # This is a placeholder for the Selenium implementation
+            import os
+            if not os.getenv("SOCIAL_SCRAPER_ENABLED"):
+                self.logger.debug("Social media scraper disabled (set SOCIAL_SCRAPER_ENABLED=1 to enable)")
+                return []
+
+            # TODO: Implement Selenium/API-based social scraping
             self.logger.info("Social Media Scraper: Searching for market sentiment...")
-            
-            # TODO: Implement Selenium driver initialization and search logic
-            # For now, simulate high-quality social signals
-            headlines.append({"headline": "Reddit r/IndiaInvestments: Bullish on NIFTY IT sector rebound", "source": "Reddit", "type": "social"})
-            headlines.append({"headline": "X (Twitter): FII flows turning positive for Indian financials", "source": "X", "type": "social"})
             
         except Exception as e:
             self.logger.error(f"Social scraping failed: {e}")

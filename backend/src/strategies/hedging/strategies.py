@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any
 import pandas as pd
 import numpy as np
+from datetime import datetime
 from src.strategies.base import BaseStrategy, StrategySignal
 
 class DeltaHedging(BaseStrategy):
@@ -32,17 +33,20 @@ class DeltaHedging(BaseStrategy):
             # If position has drifted significantly, rehedge
             if abs(momentum) > self.rehedge_threshold:
                 signal_direction = "SELL" if momentum > 0 else "BUY"
-                
+                _sym = market_data['symbol'].iloc[-1] if 'symbol' in market_data.columns else 'NIFTY'
                 return StrategySignal(
-                    entry_type="DELTA_HEDGE_REBALANCE",
-                    symbol=market_data.get('symbol', 'NIFTY'),
-                    direction=signal_direction,
+                    signal_id=f"DELTA_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
+                    symbol=_sym,
+                    signal_type=signal_direction,
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
                     quantity=1,
-                    confidence=85,
+                    strength=0.85,
                     stop_loss=current_close + (current_close * abs(momentum) * 2),
-                    target=current_close,
+                    target_price=current_close,
                     metadata={
+                        "entry_type": "DELTA_HEDGE_REBALANCE",
                         "strategy_type": "delta_hedging",
                         "current_delta": round(momentum, 3),
                         "target_delta": self.target_delta,
@@ -85,16 +89,21 @@ class PortfolioHedge(BaseStrategy):
             
             # Signal when drawdown exceeds threshold (portfolio protection needed)
             if current_dd < -self.dd_threshold:
+                _sym = market_data['symbol'].iloc[-1] if 'symbol' in market_data.columns else 'NIFTY'
                 return StrategySignal(
-                    entry_type="PORTFOLIO_HEDGE",
-                    symbol=market_data.get('symbol', 'NIFTY'),
-                    direction="BUY_PUTS",
+                    signal_id=f"HEDGE_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
+                    symbol=_sym,
+                    signal_type="BUY",
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
-                    quantity=int(abs(current_dd) * 10),  # Size based on drawdown
-                    confidence=80,
+                    quantity=max(1, int(abs(current_dd) * 10)),
+                    strength=0.80,
                     stop_loss=current_close + (current_close * 0.03),
-                    target=current_close - (current_close * abs(current_dd) * 0.5),
+                    target_price=current_close - (current_close * abs(current_dd) * 0.5),
                     metadata={
+                        "entry_type": "PORTFOLIO_HEDGE",
+                        "instrument_type": "PUT",
                         "strategy_type": "portfolio_hedge",
                         "current_drawdown_pct": round(current_dd * 100, 2),
                         "dd_threshold_pct": self.dd_threshold * 100,
@@ -143,17 +152,20 @@ class PairTrading(BaseStrategy):
             # Signal when pair is significantly mispriced
             if abs(current_zscore) > self.zscore_threshold:
                 signal_direction = "SELL" if current_zscore > 0 else "BUY"
-                
+                _sym = market_data['symbol'].iloc[-1] if 'symbol' in market_data.columns else 'NIFTY'
                 return StrategySignal(
-                    entry_type="PAIR_TRADE",
-                    symbol=market_data.get('symbol', 'NIFTY'),
-                    direction=signal_direction,
+                    signal_id=f"PAIR_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    strategy_name=self.name,
+                    symbol=_sym,
+                    signal_type=signal_direction,
+                    market_regime_at_signal=regime,
                     entry_price=current_close,
                     quantity=1,
-                    confidence=72,
+                    strength=0.72,
                     stop_loss=current_close + (spread_std * 1.5),
-                    target=spread_mean,
+                    target_price=spread_mean,
                     metadata={
+                        "entry_type": "PAIR_TRADE",
                         "strategy_type": "pair_trading",
                         "zscore": round(current_zscore, 2),
                         "spread_mean": round(spread_mean, 2),

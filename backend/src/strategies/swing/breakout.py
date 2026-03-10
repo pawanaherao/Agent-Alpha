@@ -254,8 +254,8 @@ class SwingBreakoutStrategy(BaseStrategy):
                 f"RSI={rsi:.1f} valid={rsi_valid}, ADX={adx:.1f} valid={adx_valid}"
             )
             
-            # All conditions must be met
-            if not (is_breakout and rsi_valid):
+            # All conditions must be met (WHITEBOX: breakout + volume + RSI + ADX)
+            if not (is_breakout and volume_confirmed and rsi_valid and adx_valid):
                 return None
             
             # Calculate stop-loss and target

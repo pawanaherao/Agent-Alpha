@@ -84,6 +84,78 @@ CREATE INDEX IF NOT EXISTS idx_market_data_symbol ON market_data_cache(symbol);
 CREATE INDEX IF NOT EXISTS idx_market_data_timestamp ON market_data_cache(timestamp);
 CREATE INDEX IF NOT EXISTS idx_market_data_symbol_time ON market_data_cache(symbol, timestamp);
 
+-- ============================================================================
+-- Open positions table - source of truth for SL/TP monitoring
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS open_positions (
+    id SERIAL PRIMARY KEY,
+    symbol VARCHAR(50) NOT NULL,
+    security_id VARCHAR(30),
+    exchange_segment VARCHAR(20),
+    product_type VARCHAR(20),
+    strategy_id VARCHAR(100),
+    signal_id VARCHAR(150),
+    side VARCHAR(10) NOT NULL,           -- BUY or SELL
+    quantity INT NOT NULL,
+    entry_price DECIMAL(12, 4) NOT NULL,
+    stop_loss DECIMAL(12, 4),
+    target_price DECIMAL(12, 4),
+    order_id VARCHAR(100) UNIQUE,
+    entry_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ltp DECIMAL(12, 4) DEFAULT 0,
+    unrealized_pnl DECIMAL(12, 4) DEFAULT 0,
+    realized_pnl DECIMAL(12, 4) DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'OPEN',   -- OPEN, CLOSED, SL_HIT, TARGET_HIT
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_open_positions_symbol ON open_positions(symbol);
+CREATE INDEX IF NOT EXISTS idx_open_positions_status ON open_positions(status);
+CREATE INDEX IF NOT EXISTS idx_open_positions_strategy ON open_positions(strategy_id);
+CREATE INDEX IF NOT EXISTS idx_open_positions_signal ON open_positions(signal_id);
+
+-- Daily PnL summary
+CREATE TABLE IF NOT EXISTS daily_pnl (
+    id SERIAL PRIMARY KEY,
+    trade_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    realized_pnl DECIMAL(12, 4) DEFAULT 0,
+    unrealized_pnl DECIMAL(12, 4) DEFAULT 0,
+    total_trades INT DEFAULT 0,
+    winning_trades INT DEFAULT 0,
+    losing_trades INT DEFAULT 0,
+    gross_pnl DECIMAL(12, 4) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(trade_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_pnl_date ON daily_pnl(trade_date);
+
+-- ============================================================================
+-- Options multi-leg positions
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS options_positions (
+    position_id    TEXT PRIMARY KEY,
+    signal_id      TEXT,
+    symbol         VARCHAR(50) NOT NULL,
+    structure_type VARCHAR(40),
+    status         VARCHAR(20) DEFAULT 'OPEN',
+    legs_json      JSONB,
+    net_premium    DECIMAL(12, 4) DEFAULT 0,
+    max_profit     DECIMAL(12, 4),
+    max_loss       DECIMAL(12, 4),
+    realized_pnl   DECIMAL(12, 4) DEFAULT 0,
+    greeks_json    JSONB,
+    expiry         VARCHAR(20),
+    opened_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    closed_at      TIMESTAMP,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_opts_pos_symbol   ON options_positions(symbol);
+CREATE INDEX IF NOT EXISTS idx_opts_pos_status   ON options_positions(status);
+CREATE INDEX IF NOT EXISTS idx_opts_pos_expiry   ON options_positions(expiry);
+
 -- Grant permissions
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "user";
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "user";

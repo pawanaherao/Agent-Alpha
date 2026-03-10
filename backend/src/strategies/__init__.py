@@ -28,7 +28,8 @@ except ImportError:
 from .swing.breakout import SwingBreakoutStrategy
 from .swing.ema_crossover import EMACrossoverStrategy
 try:
-    from .swing.pullback import PullbackStrategy
+    from .swing.pullback import TrendPullbackStrategy
+    PullbackStrategy = TrendPullbackStrategy
 except ImportError:
     pass
 
@@ -124,55 +125,61 @@ except ImportError:
 # STRATEGY REGISTRY
 # ============================================================================
 # Dictionary of all available strategies for dynamic loading
-STRATEGY_REGISTRY = {
+_STRATEGY_REGISTRY_CANDIDATES = {
     # Directional (4)
-    "ORB": ORBMomentumStrategy,
-    "VWAPBounce": VWAPBounceStrategy,
-    "TrendFollowing": TrendFollowingStrategy,
-    "OrderFlow": OrderFlowStrategy,
-    
+    "ORB": globals().get("ORBMomentumStrategy"),
+    "VWAPBounce": globals().get("VWAPBounceStrategy"),
+    "TrendFollowing": globals().get("TrendFollowingStrategy"),
+    "OrderFlow": globals().get("OrderFlowStrategy"),
+
     # Swing (3)
-    "SwingBreakout": SwingBreakoutStrategy,
-    "EMACrossover": EMACrossoverStrategy,
-    "Pullback": PullbackStrategy,
-    
+    "SwingBreakout": globals().get("SwingBreakoutStrategy"),
+    "EMACrossover": globals().get("EMACrossoverStrategy"),
+    "Pullback": globals().get("PullbackStrategy"),
+
     # Intraday (2)
-    "ORBIntraday": ORBMomentumStrategy,
-    "VWAPReversion": VWAPReversionStrategy,
-    
+    "ORBIntraday": globals().get("ORBMomentumStrategy"),
+    "VWAPReversion": globals().get("VWAPReversionStrategy"),
+
     # Multi-Leg (3)
-    "IronCondor": IronCondor,
-    "Butterfly": ButterflySpread,
-    "LongStrangle": LongStrangle,
-    
+    "IronCondor": globals().get("IronCondor"),
+    "Butterfly": globals().get("ButterflySpread"),
+    "LongStrangle": globals().get("LongStrangle"),
+
     # Spreads (4)
-    "BullCallSpread": BullCallSpread,
-    "BearPutSpread": BearPutSpread,
-    "RatioSpread": RatioSpread,
-    "CalendarSpread": CalendarSpread,
-    
+    "BullCallSpread": globals().get("BullCallSpread"),
+    "BearPutSpread": globals().get("BearPutSpread"),
+    "RatioSpread": globals().get("RatioSpread"),
+    "CalendarSpread": globals().get("CalendarSpread"),
+
     # Volatility (2)
-    "LongStraddle": LongStraddle,
-    "VIXTrading": VIXTrading,
-    
+    "LongStraddle": globals().get("LongStraddle"),
+    "VIXTrading": globals().get("VIXTrading"),
+
     # Hedging (3)
-    "DeltaHedging": DeltaHedging,
-    "PortfolioHedge": PortfolioHedge,
-    "PairTrading": PairTrading,
-    
+    "DeltaHedging": globals().get("DeltaHedging"),
+    "PortfolioHedge": globals().get("PortfolioHedge"),
+    "PairTrading": globals().get("PairTrading"),
+
     # Quant (3)
-    "CrossSectionalMomentum": CrossSectionalMomentumStrategy,
-    "VolatilityArbitrage": VolatilityArbitrageStrategy,
-    "PairsFinder": PairsFinder,
-    
+    "CrossSectionalMomentum": globals().get("CrossSectionalMomentumStrategy"),
+    "VolatilityArbitrage": globals().get("VolatilityArbitrageStrategy"),
+    "PairsFinder": globals().get("PairsFinder"),
+
     # Wave 2 (4)
-    "EarningsMomentum": EarningsMomentumStrategy,
-    "GapFill": GapFillStrategy,
-    "MomentumRotation": MomentumRotationStrategy,
-    "SectorRotation": SectorRotationStrategy,
-    
+    "EarningsMomentum": globals().get("EarningsMomentumStrategy"),
+    "GapFill": globals().get("GapFillStrategy"),
+    "MomentumRotation": globals().get("MomentumRotationStrategy"),
+    "SectorRotation": globals().get("SectorRotationStrategy"),
+
     # Core (1)
-    "Universal": UniversalStrategy,
+    "Universal": globals().get("UniversalStrategy"),
+}
+
+STRATEGY_REGISTRY = {
+    key: strategy
+    for key, strategy in _STRATEGY_REGISTRY_CANDIDATES.items()
+    if strategy is not None
 }
 
 # ============================================================================

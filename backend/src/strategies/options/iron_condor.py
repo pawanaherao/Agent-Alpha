@@ -24,8 +24,13 @@ class IronCondorStrategy(BaseStrategy):
         elif regime == "VOLATILE":
             score -= 30.0 # Dangerous
             
-        # VIX Check: Need decent premiums (VIX > 12)
-        vix = market_data.get('vix', 14.0)
+        # B21 fix: VIX Check — handle DataFrame correctly
+        vix = 14.0  # default
+        if isinstance(market_data, pd.DataFrame):
+            if 'vix' in market_data.columns:
+                vix = float(market_data['vix'].iloc[-1])
+        elif isinstance(market_data, dict):
+            vix = market_data.get('vix', 14.0)
         if vix > 12:
             score += 10.0
             

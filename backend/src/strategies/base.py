@@ -7,14 +7,27 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+class LegDetail(BaseModel):
+    """
+    Lightweight leg descriptor embedded in StrategySignal.metadata
+    for multi-leg strategies.  Full-featured legs use LegSignal from
+    src.models.options for the dedicated options pipeline.
+    """
+    strike: float
+    option_type: str  # CE or PE
+    action: str       # BUY or SELL
+    quantity: int = 1
+    premium: Optional[float] = None
+
 class StrategySignal(BaseModel):
     """
     Standard output from any strategy.
+    Extended to carry optional multi-leg information.
     """
     signal_id: str = Field(..., description="Unique ID for this signal event")
     strategy_name: str
     symbol: str
-    signal_type: str  # BUY, SELL, HOLD
+    signal_type: str  # BUY, SELL, HOLD, IRON_CONDOR, STRADDLE, etc.
     strength: float = Field(0.0, ge=0.0, le=1.0, description="Confidence score")
     
     # Execution details
@@ -22,6 +35,15 @@ class StrategySignal(BaseModel):
     stop_loss: Optional[float] = None
     target_price: Optional[float] = None
     quantity: int = 1
+
+    # Multi-leg support (optional — used by options strategies)
+    legs: List[LegDetail] = Field(default_factory=list)
+    structure_type: Optional[str] = None   # e.g. "IRON_CONDOR", "BULL_CALL_SPREAD"
+    net_premium: Optional[float] = None    # +ve = credit, -ve = debit
+    max_profit: Optional[float] = None
+    max_loss: Optional[float] = None
+    breakevens: List[float] = Field(default_factory=list)
+    expiry: Optional[str] = None
     
     # Metadata
     timestamp: datetime = Field(default_factory=datetime.now)

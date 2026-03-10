@@ -27,51 +27,99 @@ class VolSurfaceBuilder:
         self.chain_data = {}
     
     async def build_surface(self):
-        """Fetch chain and build volatility surface model."""
+        """
+        Fetch option chain and build volatility surface model.
+        B10 fix: Uses real parsed option chain data from get_option_chain().
+        Returns a list of anomaly dicts (strike, expiry, market_iv, model_iv, type).
+        """
         try:
-            # 1. Fetch Option Chain
+            # 1. Fetch Option Chain (now returns real calls/puts with IVs)
             self.chain = await nse_data_service.get_option_chain(self.symbol)
             if not self.chain or 'data' not in self.chain:
                 logger.warning(f"No option chain data for {self.symbol}")
                 return []
 
             spot = self.chain.get('spot_price', 0)
-            if spot == 0: return []
-            
+            chain_data = self.chain.get('data', [])
+            if spot == 0 or not chain_data:
+                logger.warning(f"Empty chain or zero spot for {self.symbol}")
+                return []
+
             anomalies = []
-            
-            # 2. Process by Expiry
-            # For simplicity in this engine, we focus on the nearest monthly expiry
-            # Real implementation would interpolate across time (Surface)
-            valid_expiries = self.chain.get('expiry_dates', [])[:3] 
-            
-            for expiry in valid_expiries:
-                # Mocking the data extraction provided by nse_data_service
-                # In a real scenario, we'd iterate through the 'data' list
-                # Since get_option_chain returns a simplified structure, we simulate logic here
-                # or assume nse_data_service gives us what we need.
-                
-                # Let's assume we have a list of strikes
-                strikes = np.linspace(spot * 0.9, spot * 1.1, 20) # Mock strikes
-                market_prices = [] 
-                ivs = []
-                
-                # Calculate IV for each strike (Simulated for this implementation plan)
-                # In production: inverse_black_scholes(market_price, strike, T, r, spot)
-                
-                # ... [IV Calculation Loop] ...
-                
-                # 3. Fit Smile (Cubic Spline)
-                # Filter for valid IVs
-                # model = CubicSpline(strikes, ivs)
-                
-                # 4. Detect Mispricing
-                # theoretical_iv = model(strike)
-                # if market_iv > theoretical_iv + threshold:
-                #    anomalies.append(...)
-                
-                pass
-                
+
+            # 2. Group data by expiry, then by option type (CE/PE)
+            from collections import defaultdict
+            expiry_groups: Dict[str, Dict[str, list]] = defaultdict(lambda: {"CE": [], "PE": []})
+            for item in chain_data:
+                exp = item.get("expiry", "unknown")
+                otype = item.get("option_type", "CE")
+                expiry_groups[exp][otype].append(item)
+
+            # 3. Process each expiry
+            for expiry, sides in expiry_groups.items():
+                for option_type_label, items in sides.items():
+                    if len(items) < 5:
+                        continue  # need enough strikes to fit a curve
+
+                    strikes = []
+                    ivs = []
+                    for item in items:
+                        strike = item.get("strike", 0)
+                        iv = item.get("implied_volatility", 0)
+                        price = item.get("last_price", 0)
+
+                        # If broker-provided IV is available, use it directly
+                        if iv > 0.01:
+                            strikes.append(strike)
+                            ivs.append(iv)
+                        elif price > 0 and strike > 0:
+                            # Calculate IV from market price via Black-Scholes inverse
+                            # Estimate T (time to expiry) — rough 7-day default for nearest
+                            T = 7 / 365.0
+                            calc_type = 'call' if option_type_label == 'CE' else 'put'
+                            computed_iv = self.implied_volatility(price, spot, strike, T, self.risk_free_rate, calc_type)
+                            if 0.01 < computed_iv < 2.0:
+                                strikes.append(strike)
+                                ivs.append(computed_iv)
+
+                    if len(strikes) < 5:
+                        continue
+
+                    strikes_arr = np.array(strikes)
+                    ivs_arr = np.array(ivs)
+
+                    # 4. Fit Volatility Smile via Cubic Spline
+                    sort_idx = np.argsort(strikes_arr)
+                    strikes_sorted = strikes_arr[sort_idx]
+                    ivs_sorted = ivs_arr[sort_idx]
+
+                    try:
+                        model = CubicSpline(strikes_sorted, ivs_sorted)
+                    except Exception:
+                        continue
+
+                    # 5. Detect Anomalies — market IV > model IV + 2σ
+                    residuals = ivs_sorted - model(strikes_sorted)
+                    residual_std = np.std(residuals) if len(residuals) > 1 else 0.01
+                    threshold = 2.0 * residual_std
+
+                    for i, strike in enumerate(strikes_sorted):
+                        model_iv = float(model(strike))
+                        market_iv = float(ivs_sorted[i])
+                        if market_iv > model_iv + threshold:
+                            anomalies.append({
+                                "symbol": self.symbol,
+                                "expiry": expiry,
+                                "strike": float(strike),
+                                "option_type": option_type_label,
+                                "market_iv": round(market_iv, 4),
+                                "model_iv": round(model_iv, 4),
+                                "deviation_sigma": round((market_iv - model_iv) / residual_std, 2),
+                                "action": "SHORT",  # Overpriced — sell candidate
+                                "spot_price": spot,
+                            })
+
+            logger.info(f"Vol surface built for {self.symbol}: {len(anomalies)} anomalies detected")
             return anomalies
             
         except Exception as e:

@@ -204,24 +204,37 @@ class VWAPReversionStrategy(BaseStrategy):
             return None
     
     def _calculate_vwap(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate VWAP from OHLCV data."""
+        """Calculate VWAP from OHLCV data, resetting each calendar day."""
         if 'vwap' in df.columns:
             return df
-        
+
         # Typical price
         df['typical_price'] = (df['high'] + df['low'] + df['close']) / 3
-        
-        # VWAP = Cumulative(TP * Volume) / Cumulative(Volume)
+
+        # Ensure a date column for daily grouping
+        if 'date' not in df.columns:
+            idx = df.index
+            if hasattr(idx, 'date'):
+                df['date'] = idx.date
+            elif 'datetime' in df.columns:
+                df['date'] = pd.to_datetime(df['datetime']).dt.date
+            elif 'timestamp' in df.columns:
+                df['date'] = pd.to_datetime(df['timestamp']).dt.date
+            else:
+                # Fallback: treat entire series as one session (daily bar data)
+                df['date'] = 'session'
+
+        # VWAP = Cumulative(TP * Volume) / Cumulative(Volume) — reset per day
         df['tp_volume'] = df['typical_price'] * df['volume']
-        df['cumulative_tp_volume'] = df['tp_volume'].cumsum()
-        df['cumulative_volume'] = df['volume'].cumsum()
-        
-        df['vwap'] = df['cumulative_tp_volume'] / df['cumulative_volume']
-        
+        df['cumulative_tp_volume'] = df.groupby('date')['tp_volume'].cumsum()
+        df['cumulative_volume'] = df.groupby('date')['volume'].cumsum()
+
+        df['vwap'] = df['cumulative_tp_volume'] / df['cumulative_volume'].replace(0, float('nan'))
+
         # Calculate RSI if not present
         if 'rsi' not in df.columns:
             df['rsi'] = ta.momentum.rsi(df['close'], window=14)
-        
+
         return df
     
     def get_strategy_info(self) -> Dict[str, Any]:

@@ -80,8 +80,19 @@ class MomentumRotationStrategy(BaseStrategy):
             
             stock_return = (current_price - start_price) / start_price
             
-            # Simple RS calculation (would compare to benchmark in full version)
-            rs_score = min(100, max(0, 50 + stock_return * 200))
+            # B18 fix: Calculate RS relative to NIFTY 50 benchmark
+            benchmark_return = 0.0
+            try:
+                nifty_data = await self.nse_service.get_index_ohlc("NIFTY 50", "3M")
+                if nifty_data is not None and len(nifty_data) >= self.lookback_period:
+                    nifty_current = float(nifty_data['close'].iloc[-1])
+                    nifty_start = float(nifty_data['close'].iloc[-self.lookback_period])
+                    benchmark_return = (nifty_current - nifty_start) / nifty_start
+            except Exception:
+                pass  # If benchmark data unavailable, relative = absolute
+            
+            relative_return = stock_return - benchmark_return
+            rs_score = min(100, max(0, 50 + relative_return * 200))
             
             if rs_score < self.rs_threshold:
                 return None
@@ -107,6 +118,8 @@ class MomentumRotationStrategy(BaseStrategy):
                     "strategy_id": self.STRATEGY_ID,
                     "rs_score": rs_score,
                     "return_3m": stock_return * 100,
+                    "benchmark_return_3m": benchmark_return * 100,
+                    "relative_return_3m": relative_return * 100,
                     "holding_period": "Monthly rotation",
                     "sebi_algo_id": self.STRATEGY_ID
                 }

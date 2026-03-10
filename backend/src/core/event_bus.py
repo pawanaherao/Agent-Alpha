@@ -10,9 +10,13 @@ class EventBus:
     Supports publish-subscribe pattern.
     Fallback in-memory implementation.
     """
+    _instance: "EventBus | None" = None  # singleton reference for service-layer access
+
     def __init__(self):
         # Map event_type -> List of callback functions
         self.subscribers: Dict[str, List[Callable[[Dict[str, Any]], Awaitable[None]]]] = {}
+        # Track the latest instance as class-level singleton
+        EventBus._instance = self
 
     def subscribe(self, event_type: str, callback: Callable[[Dict[str, Any]], Awaitable[None]]):
         """

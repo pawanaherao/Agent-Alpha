@@ -1,4 +1,11 @@
-from google.cloud import firestore
+# google-cloud-firestore is optional — app runs without it in local mode
+try:
+    from google.cloud import firestore
+    FIRESTORE_AVAILABLE = True
+except ImportError:
+    firestore = None
+    FIRESTORE_AVAILABLE = False
+
 from src.core.config import settings
 import logging
 import os
@@ -18,6 +25,10 @@ class FirestoreClient:
 
     def connect(self):
         """Initialize Firestore client with graceful fallback."""
+        if not FIRESTORE_AVAILABLE:
+            logger.info("google-cloud-firestore not installed — Firestore disabled. Audit logs → PostgreSQL.")
+            self.is_connected = False
+            return False
         try:
             # Check if emulator is available (for local testing)
             if self.emulator_host:

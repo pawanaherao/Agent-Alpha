@@ -183,6 +183,21 @@ class VolatilityCrushStrategy(BaseStrategy):
             if vix is None or vix < self.vix_entry:
                 return None
             
+            # B17 fix: Check that VIX is actually declining (not just above threshold)
+            # Use NIFTY data as proxy — if recent VIX was higher, we are on the decline
+            try:
+                vix_data = await self.nse_service.get_index_ohlc("INDIA VIX", "1M")
+                if vix_data is not None and len(vix_data) >= 5:
+                    recent_vix_high = float(vix_data['high'].iloc[-5:].max())
+                    if vix < recent_vix_high * 0.95:  # VIX must be ≥5% below recent peak
+                        logger.info(f"VIX declining: current {vix:.1f} < 5d high {recent_vix_high:.1f}")
+                    else:
+                        logger.debug(f"VIX {vix:.1f} not declining from peak {recent_vix_high:.1f}, skipping")
+                        return None
+            except Exception:
+                # If VIX data unavailable, allow trade based on threshold alone
+                pass
+            
             # Get NIFTY data
             if market_data is None or market_data.empty:
                 latest = await self.nse_service.get_latest_index_value("NIFTY 50")

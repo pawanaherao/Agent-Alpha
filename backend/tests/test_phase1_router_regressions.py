@@ -1320,6 +1320,32 @@ def test_options_greeks_route_returns_position_snapshot(monkeypatch):
     }
 
 
+def test_options_greeks_route_returns_safe_fallback_when_greeks_engine_fails(monkeypatch):
+    fake_position = SimpleNamespace(
+        legs=[{"symbol": "NIFTY24000CE"}],
+        status=SimpleNamespace(value="OPEN"),
+    )
+    fake_position_manager = SimpleNamespace(get_position=lambda _position_id: fake_position)
+    fake_greeks_engine = SimpleNamespace(
+        portfolio_greeks=lambda _legs: (_ for _ in ()).throw(RuntimeError("greeks unavailable"))
+    )
+
+    monkeypatch.setattr("src.services.options_position_manager.options_position_manager", fake_position_manager)
+    monkeypatch.setattr("src.services.greeks.greeks_engine", fake_greeks_engine)
+
+    client = TestClient(_build_router_app(options_public_router))
+    response = client.get("/options/greeks/pos-1")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "position_id": "pos-1",
+        "greeks": {},
+        "legs": 1,
+        "status": "OPEN",
+        "error": "greeks unavailable",
+    }
+
+
 def test_options_validate_route_reports_validator_config(monkeypatch):
     monkeypatch.setattr(options_public_router.settings, "OPTIONS_ENABLED", True, raising=False)
     monkeypatch.setattr(

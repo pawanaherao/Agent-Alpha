@@ -117,12 +117,19 @@ async def options_greeks(position_id: str):
     if not position:
         return {"error": f"Position {position_id} not found"}
 
-    portfolio_greeks = greeks_engine.portfolio_greeks(position.legs)
+    try:
+        portfolio_greeks = greeks_engine.portfolio_greeks(position.legs)
+        greeks_payload = portfolio_greeks.dict() if portfolio_greeks else {}
+    except Exception as exc:
+        greeks_payload = {}
+        error = str(exc)
+
     return {
         "position_id": position_id,
-        "greeks": portfolio_greeks.dict() if portfolio_greeks else {},
+        "greeks": greeks_payload,
         "legs": len(position.legs),
         "status": position.status.value if hasattr(position.status, "value") else str(position.status),
+        **({"error": error} if 'error' in locals() else {}),
     }
 
 

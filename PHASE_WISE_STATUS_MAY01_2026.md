@@ -2,9 +2,9 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including public AI budget mutation plus public options chain, greeks, positions, and validator safety.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `127 passed`.
-- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `395 passed`.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including public options safety and operator positions snapshot isolation.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `128 passed`.
+- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `396 passed`.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -21,7 +21,7 @@ Completed in the current hardening wave:
 - `/options/positions` now returns a safe empty portfolio summary plus an explicit error field when the shared portfolio summary read fails, instead of surfacing a route exception.
 - `/options/validate` now returns a safe zero-config payload plus an explicit error field when SEBI validator configuration is unavailable, instead of surfacing a route exception.
 - `/ai/status` now survives ai_router initialize/status failures plus vertex/cost status failures while preserving the normal success contract.
-- `/positions` now survives broker client creation failures and broker-name failures while still falling back to paper positions.
+- `/positions` now survives broker client creation failures, broker-name failures, and per-position policy snapshot failures while still returning the broader positions payload.
 - `/trades` now survives broker client creation failures, broker-name failures, and trade-fetch failures with a safe empty response.
 - `/closed_positions` now returns an empty payload when runtime context or agent-manager wiring is unavailable.
 - Focused failure-path regressions were added for each slice in `backend/tests/test_phase1_router_regressions.py`.
@@ -30,7 +30,7 @@ Current assessment:
 
 - Extracted operator/public runtime endpoints are materially more fault-tolerant than at the start of this wave.
 - Success payload contracts were kept stable while exceptions were converted into explicit fallback payloads.
-- Router regression coverage has grown incrementally with each slice and is currently green at `127` passing checks.
+- Router regression coverage has grown incrementally with each slice and is currently green at `128` passing checks.
 
 ## Phase 3 — Runtime Authority And Freshness
 
@@ -51,9 +51,9 @@ Status: stable, green
 
 ## Latest Slice
 
-- Hardened `/options/validate` in `backend/src/api/options_public_router.py` so missing or invalid `sebi_validator.config` state no longer surfaces a route exception.
-- Added a contract-preserving zero-config fallback carrying the normal validator identity, enabled flag, zeroed limits, and an explicit `error` field.
-- Added focused regression coverage for the missing-validator-config failure path.
+- Hardened `/positions` in `backend/src/api/operator_runtime_router.py` so `build_policy_snapshot(position)` failures no longer collapse the entire positions response.
+- Added per-position fallback behavior that keeps the original position fields and sets `policy_snapshot` to `None` when snapshot generation fails.
+- Added focused regression coverage for the policy-snapshot failure path.
 
 ## Next Slice Candidates
 

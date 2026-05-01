@@ -768,6 +768,48 @@ def test_positions_route_falls_back_to_paper_positions_when_broker_client_creati
     }
 
 
+def test_positions_route_keeps_response_when_policy_snapshot_fails(monkeypatch):
+    fake_agent_manager = SimpleNamespace(agents={})
+
+    monkeypatch.setattr(operator_runtime_router, "settings", SimpleNamespace(PAPER_TRADING=False))
+    monkeypatch.setattr(operator_runtime_router, "get_runtime_context", lambda: {"agent_manager": fake_agent_manager})
+    monkeypatch.setattr(
+        "src.services.broker_factory.get_broker_client",
+        lambda: FakeBrokerClient([
+            {
+                "status": "OPEN",
+                "symbol": "NIFTY",
+                "quantity": 50,
+                "position_type": "OPTIONS",
+            }
+        ]),
+    )
+    monkeypatch.setattr(
+        operator_runtime_router,
+        "build_policy_snapshot",
+        lambda _position: (_ for _ in ()).throw(RuntimeError("policy snapshot unavailable")),
+    )
+
+    client = TestClient(_build_router_app(operator_runtime_router))
+    response = client.get("/positions")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "positions": [
+            {
+                "status": "OPEN",
+                "symbol": "NIFTY",
+                "quantity": 50,
+                "position_type": "OPTIONS",
+                "policy_snapshot": None,
+            }
+        ],
+        "count": 1,
+        "broker": "FAKE_BROKER",
+        "paper_trading": False,
+    }
+
+
 def test_closed_positions_route_returns_empty_when_runtime_context_is_missing(monkeypatch):
     monkeypatch.setattr(operator_runtime_router, "get_runtime_context", lambda: {})
 

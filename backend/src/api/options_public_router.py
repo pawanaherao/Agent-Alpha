@@ -68,7 +68,27 @@ async def options_positions():
 
     from src.services.options_position_manager import options_position_manager
 
-    summary = options_position_manager.portfolio_summary()
+    try:
+        summary = options_position_manager.portfolio_summary()
+        if not isinstance(summary, dict):
+            raise TypeError("options portfolio summary unavailable")
+    except Exception as exc:
+        return {
+            "open_positions": 0,
+            "total_positions": 0,
+            "unrealized_pnl": 0.0,
+            "realized_pnl": 0.0,
+            "portfolio_greeks": {
+                "delta": 0.0,
+                "gamma": 0.0,
+                "theta": 0.0,
+                "vega": 0.0,
+            },
+            "positions": [],
+            "source": "options_position_manager",
+            "error": str(exc),
+        }
+
     summary["source"] = "options_position_manager"
     return summary
 

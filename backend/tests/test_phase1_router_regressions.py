@@ -1244,6 +1244,38 @@ def test_options_positions_route_uses_runtime_portfolio_state(monkeypatch):
     }
 
 
+def test_options_positions_route_returns_safe_fallback_when_summary_fails(monkeypatch):
+    monkeypatch.setattr(
+        options_public_router,
+        "get_runtime_value",
+        lambda key, default=None: None,
+    )
+    monkeypatch.setattr(
+        "src.services.options_position_manager.options_position_manager",
+        SimpleNamespace(portfolio_summary=lambda: (_ for _ in ()).throw(RuntimeError("summary unavailable"))),
+    )
+
+    client = TestClient(_build_router_app(options_public_router))
+    response = client.get("/options/positions")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "open_positions": 0,
+        "total_positions": 0,
+        "unrealized_pnl": 0.0,
+        "realized_pnl": 0.0,
+        "portfolio_greeks": {
+            "delta": 0.0,
+            "gamma": 0.0,
+            "theta": 0.0,
+            "vega": 0.0,
+        },
+        "positions": [],
+        "source": "options_position_manager",
+        "error": "summary unavailable",
+    }
+
+
 def test_options_chain_route_returns_capped_items(monkeypatch):
     class FakeItem:
         def __init__(self, idx):

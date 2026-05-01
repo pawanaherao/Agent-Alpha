@@ -1274,6 +1274,27 @@ def test_options_chain_route_returns_capped_items(monkeypatch):
     fake_service.get_chain.assert_awaited_once_with("NIFTY", num_strikes=12, enrich_greeks=False)
 
 
+def test_options_chain_route_returns_safe_fallback_when_fetch_fails(monkeypatch):
+    fake_service = SimpleNamespace(get_chain=AsyncMock(side_effect=RuntimeError("chain unavailable")))
+
+    monkeypatch.setattr("src.services.option_chain.option_chain_service", fake_service)
+
+    client = TestClient(_build_router_app(options_public_router))
+    response = client.get("/options/chain/NIFTY")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbol": "NIFTY",
+        "spot_price": None,
+        "expiry_dates": [],
+        "atm_strike": None,
+        "items_count": 0,
+        "items": [],
+        "error": "chain unavailable",
+    }
+    fake_service.get_chain.assert_awaited_once_with("NIFTY", num_strikes=10, enrich_greeks=True)
+
+
 def test_options_greeks_route_returns_position_snapshot(monkeypatch):
     fake_position = SimpleNamespace(
         legs=[{"symbol": "NIFTY24000CE"}, {"symbol": "NIFTY22000PE"}],

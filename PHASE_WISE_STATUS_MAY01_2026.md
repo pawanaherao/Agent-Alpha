@@ -2,9 +2,9 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including public AI budget mutation safety.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `123 passed`.
-- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `391 passed`.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including public AI budget mutation and options-chain safety.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `124 passed`.
+- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `392 passed`.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -16,6 +16,7 @@ Completed in the current hardening wave:
 - `/metrics` now returns a Prometheus-safe fallback comment when metric export fails.
 - `/api/ai/router` and `/api/ai/cost` now return safe error payloads instead of surfacing dependency exceptions.
 - `/api/ai/budget` now returns unchanged budget values plus an explicit error payload when tracker updates fail, while still persisting successful updates to Redis.
+- `/options/chain/{symbol}` now returns an explicit empty-chain fallback payload when live chain fetch or item serialization fails, instead of surfacing a route exception.
 - `/ai/status` now survives ai_router initialize/status failures plus vertex/cost status failures while preserving the normal success contract.
 - `/positions` now survives broker client creation failures and broker-name failures while still falling back to paper positions.
 - `/trades` now survives broker client creation failures, broker-name failures, and trade-fetch failures with a safe empty response.
@@ -26,7 +27,7 @@ Current assessment:
 
 - Extracted operator/public runtime endpoints are materially more fault-tolerant than at the start of this wave.
 - Success payload contracts were kept stable while exceptions were converted into explicit fallback payloads.
-- Router regression coverage has grown incrementally with each slice and is currently green.
+- Router regression coverage has grown incrementally with each slice and is currently green at `124` passing checks.
 
 ## Phase 3 — Runtime Authority And Freshness
 
@@ -47,9 +48,9 @@ Status: stable, green
 
 ## Latest Slice
 
-- Hardened `/api/ai/budget` in `backend/src/api/ai_public_router.py` so tracker update failures no longer surface a route exception.
-- Added a fallback response that preserves the current daily/monthly budgets, reports `status: "unchanged"`, and exposes the failure reason explicitly.
-- Added focused regression coverage for the budget-update failure path.
+- Hardened `/options/chain/{symbol}` in `backend/src/api/options_public_router.py` so live chain fetch or response-shaping failures no longer surface a route exception.
+- Added a contract-preserving fallback response with `items_count: 0`, `items: []`, and an explicit `error` field while still returning any safe chain metadata that is available.
+- Added focused regression coverage for the chain-fetch failure path.
 
 ## Next Slice Candidates
 

@@ -2,9 +2,9 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including public AI budget mutation plus public options chain, greeks, and positions safety.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `126 passed`.
-- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `394 passed`.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including public AI budget mutation plus public options chain, greeks, positions, and validator safety.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `127 passed`.
+- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `395 passed`.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -19,6 +19,7 @@ Completed in the current hardening wave:
 - `/options/chain/{symbol}` now returns an explicit empty-chain fallback payload when live chain fetch or item serialization fails, instead of surfacing a route exception.
 - `/options/greeks/{position_id}` now returns an empty-greeks fallback payload plus an explicit error field when the greeks engine fails, instead of surfacing a route exception.
 - `/options/positions` now returns a safe empty portfolio summary plus an explicit error field when the shared portfolio summary read fails, instead of surfacing a route exception.
+- `/options/validate` now returns a safe zero-config payload plus an explicit error field when SEBI validator configuration is unavailable, instead of surfacing a route exception.
 - `/ai/status` now survives ai_router initialize/status failures plus vertex/cost status failures while preserving the normal success contract.
 - `/positions` now survives broker client creation failures and broker-name failures while still falling back to paper positions.
 - `/trades` now survives broker client creation failures, broker-name failures, and trade-fetch failures with a safe empty response.
@@ -29,7 +30,7 @@ Current assessment:
 
 - Extracted operator/public runtime endpoints are materially more fault-tolerant than at the start of this wave.
 - Success payload contracts were kept stable while exceptions were converted into explicit fallback payloads.
-- Router regression coverage has grown incrementally with each slice and is currently green at `126` passing checks.
+- Router regression coverage has grown incrementally with each slice and is currently green at `127` passing checks.
 
 ## Phase 3 — Runtime Authority And Freshness
 
@@ -50,9 +51,9 @@ Status: stable, green
 
 ## Latest Slice
 
-- Hardened `/options/positions` in `backend/src/api/options_public_router.py` so `options_position_manager.portfolio_summary()` failures and invalid summary payloads no longer surface a route exception.
-- Added a shape-compatible empty portfolio fallback carrying zeroed P&L, zeroed portfolio greeks, `positions: []`, the normal `source`, and an explicit `error` field.
-- Added focused regression coverage for the portfolio-summary failure path.
+- Hardened `/options/validate` in `backend/src/api/options_public_router.py` so missing or invalid `sebi_validator.config` state no longer surfaces a route exception.
+- Added a contract-preserving zero-config fallback carrying the normal validator identity, enabled flag, zeroed limits, and an explicit `error` field.
+- Added focused regression coverage for the missing-validator-config failure path.
 
 ## Next Slice Candidates
 

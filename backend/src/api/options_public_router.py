@@ -156,13 +156,27 @@ async def options_greeks(position_id: str):
 @router.get("/options/validate")
 async def options_validate_sebi():
     """Health check for SEBI options validator."""
-    from src.middleware.sebi_options import sebi_validator
+    try:
+        from src.middleware.sebi_options import sebi_validator
 
-    cfg = sebi_validator.config
+        cfg = sebi_validator.config
+        max_lots_per_ul = cfg.max_lots_per_underlying
+        max_open_structures = cfg.max_open_structures
+        margin_buffer_pct = cfg.margin_buffer_pct
+    except Exception as exc:
+        return {
+            "validator": "SEBIOptionsValidator",
+            "enabled": settings.OPTIONS_ENABLED,
+            "max_lots_per_ul": 0,
+            "max_open_structures": 0,
+            "margin_buffer_pct": 0.0,
+            "error": str(exc),
+        }
+
     return {
         "validator": "SEBIOptionsValidator",
         "enabled": settings.OPTIONS_ENABLED,
-        "max_lots_per_ul": cfg.max_lots_per_underlying,
-        "max_open_structures": cfg.max_open_structures,
-        "margin_buffer_pct": cfg.margin_buffer_pct,
+        "max_lots_per_ul": max_lots_per_ul,
+        "max_open_structures": max_open_structures,
+        "margin_buffer_pct": margin_buffer_pct,
     }

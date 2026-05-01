@@ -1404,6 +1404,27 @@ def test_options_validate_route_reports_validator_config(monkeypatch):
     }
 
 
+def test_options_validate_route_returns_safe_fallback_when_config_missing(monkeypatch):
+    monkeypatch.setattr(options_public_router.settings, "OPTIONS_ENABLED", True, raising=False)
+    monkeypatch.setattr(
+        "src.middleware.sebi_options.sebi_validator",
+        SimpleNamespace(config=None),
+    )
+
+    client = TestClient(_build_router_app(options_public_router))
+    response = client.get("/options/validate")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "validator": "SEBIOptionsValidator",
+        "enabled": True,
+        "max_lots_per_ul": 0,
+        "max_open_structures": 0,
+        "margin_buffer_pct": 0.0,
+        "error": "'NoneType' object has no attribute 'max_lots_per_underlying'",
+    }
+
+
 def test_option_expiries_route_prefers_dhan_response(monkeypatch):
     fake_dhan_client = SimpleNamespace(
         is_connected=lambda: True,

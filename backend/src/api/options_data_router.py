@@ -188,7 +188,42 @@ async def get_vp_options_context_endpoint(
         }
     except Exception as exc:
         logger.error(f"/api/options/vp-context error for {symbol}: {exc}")
-        return {"error": str(exc), "symbol": symbol}
+        return {
+            "symbol": symbol,
+            "expiry_type": expiry_type,
+            "expiry": expiry,
+            "dte": 0,
+            "spot": 0.0,
+            "vp_timeframe": "",
+            "vp_timeframe_override": tf_override,
+            "poc": 0.0,
+            "vah": 0.0,
+            "val": 0.0,
+            "profile_shape": "",
+            "vp_range": 0.0,
+            "spot_in_vp_pct": 0.0,
+            "vp_zone": "",
+            "precision_ceiling": 0.0,
+            "precision_floor": 0.0,
+            "max_pain": 0.0,
+            "pcr": 0.0,
+            "iv_skew": 0.0,
+            "atm_iv": 0.0,
+            "sell_ce": 0,
+            "buy_ce": 0,
+            "sell_pe": 0,
+            "buy_pe": 0,
+            "strike_step": 0,
+            "suggested_structure": "",
+            "structure_rationale": "",
+            "confluence_score": 0.0,
+            "ce_wall_oi": 0,
+            "pe_wall_oi": 0,
+            "data_source": "unavailable",
+            "ce_walls": [],
+            "pe_walls": [],
+            "error": str(exc),
+        }
 
 
 @router.post("/api/options-scan")

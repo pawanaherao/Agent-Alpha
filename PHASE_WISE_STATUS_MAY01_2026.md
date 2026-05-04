@@ -2,9 +2,9 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including public options safety across both positions and options-data chains.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `129 passed`.
-- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `397 passed`.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options boundaries.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `130 passed`.
+- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `398 passed`.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -21,6 +21,7 @@ Completed in the current hardening wave:
 - `/options/positions` now returns a safe empty portfolio summary plus an explicit error field when the shared portfolio summary read fails, instead of surfacing a route exception.
 - `/options/validate` now returns a safe zero-config payload plus an explicit error field when SEBI validator configuration is unavailable, instead of surfacing a route exception.
 - `/api/options/dhan-chain` now returns a safe empty-chain payload plus an explicit error field when Dhan chain payload shaping fails, instead of surfacing a route exception.
+- `/api/options/vp-context` now returns a shape-safe zeroed context payload plus an explicit error field when the VP bridge fails, instead of collapsing the contract down to a partial error-only response.
 - `/ai/status` now survives ai_router initialize/status failures plus vertex/cost status failures while preserving the normal success contract.
 - `/positions` now survives broker client creation failures, broker-name failures, and per-position policy snapshot failures while still returning the broader positions payload.
 - `/trades` now survives broker client creation failures, broker-name failures, and trade-fetch failures with a safe empty response.
@@ -31,7 +32,7 @@ Current assessment:
 
 - Extracted operator/public runtime endpoints are materially more fault-tolerant than at the start of this wave.
 - Success payload contracts were kept stable while exceptions were converted into explicit fallback payloads.
-- Router regression coverage has grown incrementally with each slice and is currently green at `129` passing checks.
+- Router regression coverage has grown incrementally with each slice and is currently green at `130` passing checks.
 
 ## Phase 3 — Runtime Authority And Freshness
 
@@ -52,9 +53,9 @@ Status: stable, green
 
 ## Latest Slice
 
-- Hardened `/api/options/dhan-chain` in `backend/src/api/options_data_router.py` so malformed or non-numeric strike payload shaping no longer surfaces a route exception.
-- Added a contract-preserving empty-chain fallback carrying the normal symbol/expiry envelope, `count: 0`, `source: unavailable`, and an explicit `error` field.
-- Added focused regression coverage for malformed Dhan chain payload parsing.
+- Hardened `/api/options/vp-context` in `backend/src/api/options_data_router.py` so bridge failures no longer collapse the response contract to `{symbol, error}`.
+- Added a shape-safe fallback carrying the normal VP context fields with zeroed defaults, `data_source: unavailable`, and an explicit `error` field.
+- Added focused regression coverage for VP bridge failure handling.
 
 ## Next Slice Candidates
 

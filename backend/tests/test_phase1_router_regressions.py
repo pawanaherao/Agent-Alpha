@@ -1609,6 +1609,54 @@ def test_option_vp_context_route_maps_bridge_payload(monkeypatch):
     assert body["pe_walls"] == [22200]
 
 
+def test_option_vp_context_route_returns_shape_safe_fallback_when_bridge_fails(monkeypatch):
+    monkeypatch.setattr(
+        "src.services.vp_options_bridge.get_vp_options_context",
+        AsyncMock(side_effect=RuntimeError("vp bridge unavailable")),
+    )
+
+    client = TestClient(_build_router_app(options_data_router))
+    response = client.get("/api/options/vp-context?symbol=NIFTY&expiry_type=weekly&tf_override=1h&expiry=2026-04-30")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbol": "NIFTY",
+        "expiry_type": "weekly",
+        "expiry": "2026-04-30",
+        "dte": 0,
+        "spot": 0.0,
+        "vp_timeframe": "",
+        "vp_timeframe_override": "1h",
+        "poc": 0.0,
+        "vah": 0.0,
+        "val": 0.0,
+        "profile_shape": "",
+        "vp_range": 0.0,
+        "spot_in_vp_pct": 0.0,
+        "vp_zone": "",
+        "precision_ceiling": 0.0,
+        "precision_floor": 0.0,
+        "max_pain": 0.0,
+        "pcr": 0.0,
+        "iv_skew": 0.0,
+        "atm_iv": 0.0,
+        "sell_ce": 0,
+        "buy_ce": 0,
+        "sell_pe": 0,
+        "buy_pe": 0,
+        "strike_step": 0,
+        "suggested_structure": "",
+        "structure_rationale": "",
+        "confluence_score": 0.0,
+        "ce_wall_oi": 0,
+        "pe_wall_oi": 0,
+        "data_source": "unavailable",
+        "ce_walls": [],
+        "pe_walls": [],
+        "error": "vp bridge unavailable",
+    }
+
+
 def test_options_scan_route_shapes_decisions_for_frontend(monkeypatch):
     class FakeScanner:
         def _default_fno_universe(self):

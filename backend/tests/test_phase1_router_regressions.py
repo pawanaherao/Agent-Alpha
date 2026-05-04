@@ -3011,6 +3011,29 @@ def test_market_quote_route_returns_yfinance_fallback_in_backtest_mode(monkeypat
     }
 
 
+def test_market_quote_route_returns_shape_safe_fallback_when_yfinance_fails(monkeypatch):
+    monkeypatch.setitem(sys.modules, "src.services.dhan_client", SimpleNamespace(get_dhan_client=lambda: SimpleNamespace(is_connected=lambda: False)))
+    monkeypatch.setattr(market_data_router, "_get_kotak_ltp_map", AsyncMock(return_value={}))
+
+    class FakeTicker:
+        def __init__(self, ticker_symbol):
+            raise RuntimeError("yfinance unavailable")
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(Ticker=FakeTicker))
+
+    client = TestClient(_build_router_app(market_data_router))
+    response = client.get("/api/market/quote/RELIANCE?backtest=true")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbol": "RELIANCE",
+        "source": "yfinance",
+        "mode": "ticker",
+        "error": "yfinance unavailable",
+        "data": {"ltp": 0, "open": 0, "high": 0, "low": 0, "close": 0},
+    }
+
+
 def test_account_fund_limits_route_returns_error_when_dhan_disconnected(monkeypatch):
     monkeypatch.setitem(sys.modules, "src.services.dhan_client", SimpleNamespace(get_dhan_client=lambda: SimpleNamespace(is_connected=lambda: False)))
 

@@ -371,4 +371,10 @@ async def market_quote(symbol: str, mode: str = "ohlc", backtest: bool = False):
             "data": {"ltp": ltp, "open": 0, "high": 0, "low": 0, "close": 0},
         }
     except Exception as exc:
-        return {"symbol": symbol, "error": str(exc), "data": {}}
+        return {
+            "symbol": symbol,
+            "source": "yfinance",
+            "mode": "ticker",
+            "error": str(exc),
+            "data": {"ltp": 0, "open": 0, "high": 0, "low": 0, "close": 0},
+        }

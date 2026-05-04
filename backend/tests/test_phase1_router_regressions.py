@@ -304,6 +304,54 @@ def test_command_journal_route_returns_filtered_entries(monkeypatch):
     assert body["entries"][0]["action"] == "portfolio_reset"
 
 
+def test_command_journal_route_returns_audit_fallback_when_journal_cache_is_corrupted(monkeypatch):
+    fake_cache = FakeCache()
+    fake_cache.store[manual_controls._k("command_journal")] = "{not-json"
+    fake_cache.store[manual_controls._k("audit_log")] = json.dumps([
+        {
+            "command_id": "mc_900",
+            "action": "portfolio_reset",
+            "scope": "portfolio_admin",
+            "status": "applied",
+        }
+    ])
+    monkeypatch.setattr(admin_controls_router, "cache", fake_cache)
+
+    client = TestClient(_build_router_app(admin_controls_router))
+    response = client.get("/api/controls/command-journal?limit=5")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "entries": [
+            {
+                "command_id": "mc_900",
+                "action": "portfolio_reset",
+                "scope": "portfolio_admin",
+                "status": "applied",
+            }
+        ],
+        "total": 1,
+        "source": "audit_log_fallback",
+        "error": "command_journal payload invalid",
+    }
+
+
+def test_audit_log_route_returns_safe_empty_payload_when_cache_is_corrupted(monkeypatch):
+    fake_cache = FakeCache()
+    fake_cache.store[manual_controls._k("audit_log")] = "{not-json"
+    monkeypatch.setattr(admin_controls_router, "cache", fake_cache)
+
+    client = TestClient(_build_router_app(admin_controls_router))
+    response = client.get("/api/controls/audit-log?limit=5")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "entries": [],
+        "total": 0,
+        "error": "audit_log payload invalid",
+    }
+
+
 def test_equity_scanner_toggle_route_delegates_to_manual_controls(monkeypatch):
     fake_cache = FakeCache()
     toggle_equity_scanner = AsyncMock(return_value={"enabled": False, "reason": "maintenance"})

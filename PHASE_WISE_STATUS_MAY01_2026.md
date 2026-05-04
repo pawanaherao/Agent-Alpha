@@ -2,9 +2,9 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options, account, broker-management, trading execution-mode, execution-broker, and market-data boundaries.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `143 passed`.
-- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `408 passed`.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options, account, broker-management, authenticated control history, trading execution-mode, execution-broker, and market-data boundaries.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `145 passed`.
+- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `410 passed`.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -28,6 +28,8 @@ Completed in the current hardening wave:
 - `/api/user/watchlist` setter now preserves the sanitized symbol payload when cache persistence fails, instead of surfacing a cache-write exception.
 - `/api/market/quote/{symbol}` now preserves the normal quote envelope when the yfinance fallback fails, instead of collapsing to a partial error-only payload.
 - `/api/account/fund-limits` now preserves a shape-safe Dhan payload with an explicit error field when the fund-limits fetch fails, instead of surfacing a route exception.
+- `/api/controls/command-journal` now falls back safely to audit history and preserves its normal journal payload when cached command history is unavailable or corrupted, instead of surfacing a decode exception from the authenticated control gateway.
+- `/api/controls/audit-log` now preserves a safe empty history payload with an explicit error field when cached audit history is unavailable or corrupted, instead of surfacing a decode exception from the authenticated control gateway.
 - `/api/broker/status` now preserves the broker-status contract with an explicit error field and disconnected fallback state when broker-client creation fails, instead of surfacing a route exception.
 - `POST /api/broker/switch` now returns structured HTTP failure payloads and restores the prior broker setting when reset fails, instead of returning tuple-style errors and leaving partial switch state behind.
 - `/api/trading/execution-mode` now preserves the execution-mode selector contract with an explicit error field when runtime lookup fails, instead of collapsing to a tuple-style error response.
@@ -45,7 +47,7 @@ Current assessment:
 
 - Extracted operator/public runtime endpoints are materially more fault-tolerant than at the start of this wave.
 - Success payload contracts were kept stable while exceptions were converted into explicit fallback payloads.
-- Router regression coverage has grown incrementally with each slice and is currently green at `143` passing checks.
+- Router regression coverage has grown incrementally with each slice and is currently green at `145` passing checks.
 
 ## Phase 3 — Runtime Authority And Freshness
 
@@ -70,12 +72,13 @@ Status: gated, 0%
 
 - Phase 5 is already defined in the supplementary SDLC, but it remains blocked on earlier control-plane, AI-authority, and runtime-orchestration exit criteria.
 - The practical next work remains the remaining unblocked Phases 1-4 hardening slices rather than early text-admin execution work.
+- The latest authenticated command-journal and audit-history hardening is Phase 5-preparatory control-plane work only; formal text-command gateway, intent parsing, dry-run plan rendering, and approval execution remain gated.
 
 ## Latest Slice
 
-- Hardened the broker-management routes in `backend/src/api/broker_management_router.py` so `GET /api/broker/status` now preserves its normal status contract on broker-client failures and `POST /api/broker/switch` now returns structured HTTP failure payloads while restoring the prior broker setting if the reset path fails.
-- Added focused regression coverage for broker-status fallback handling and broker-switch reset failures.
-- Confirmed the current validated baseline in this worktree at `143` router regressions and `408` full backend tests.
+- Hardened the authenticated control-history routes across `backend/src/api/admin_controls_router.py` and `backend/src/services/manual_controls.py` so command journal reads now fall back safely to audit history and audit-log reads now degrade to an empty history payload when cached JSON is unavailable or corrupted.
+- Added focused regression coverage for corrupted command-journal fallback handling and corrupted audit-log recovery.
+- Confirmed the current validated baseline in this worktree at `145` router regressions and `410` full backend tests.
 
 ## Next Slice Candidates
 

@@ -2170,6 +2170,30 @@ def test_get_execution_mode_route_returns_execution_agent_mode(monkeypatch):
     assert body["options"] == ["MANUAL", "HYBRID", "AUTO"]
 
 
+def test_get_execution_mode_route_returns_safe_fallback_when_runtime_lookup_fails(monkeypatch):
+    monkeypatch.setattr(
+        trading_mode_router,
+        "get_runtime_value",
+        lambda key, default=None: (_ for _ in ()).throw(RuntimeError("runtime unavailable")),
+    )
+
+    client = TestClient(_build_router_app(trading_mode_router))
+    response = client.get("/api/trading/execution-mode")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "mode": "AUTO",
+        "options": ["MANUAL", "HYBRID", "AUTO"],
+        "hybrid_threshold": 0.8,
+        "description": {
+            "MANUAL": "All trades require user approval",
+            "HYBRID": "Auto-execute if signal strength > 80%, else user approval",
+            "AUTO": "All trades execute automatically without user approval",
+        },
+        "error": "runtime unavailable",
+    }
+
+
 def test_set_execution_mode_route_persists_to_cache(monkeypatch):
     fake_cache = FakeCache()
     fake_exec_agent = SimpleNamespace(mode="AUTO")
@@ -2182,12 +2206,39 @@ def test_set_execution_mode_route_persists_to_cache(monkeypatch):
     )
 
     client = TestClient(_build_router_app(trading_mode_router))
-    response = client.post("/api/trading/execution-mode?mode=MANUAL")
+    response = client.post("/api/trading/execution-mode", json={"mode": "manual"})
 
     assert response.status_code == 200
-    assert response.json()["mode"] == "MANUAL"
+    assert response.json() == {
+        "success": True,
+        "mode": "MANUAL",
+        "message": "Execution mode set to MANUAL",
+    }
     assert fake_exec_agent.mode == "MANUAL"
     assert fake_cache.store["execution_mode"] == "MANUAL"
+
+
+def test_set_execution_mode_route_returns_safe_payload_when_execution_agent_missing(monkeypatch):
+    fake_cache = FakeCache()
+    fake_agent_manager = SimpleNamespace(agents={})
+    monkeypatch.setattr(trading_mode_router, "cache", fake_cache)
+    monkeypatch.setattr(
+        trading_mode_router,
+        "get_runtime_value",
+        lambda key, default=None: fake_agent_manager if key == "agent_manager" else default,
+    )
+
+    client = TestClient(_build_router_app(trading_mode_router))
+    response = client.post("/api/trading/execution-mode", json={"mode": "HYBRID"})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "success": False,
+        "mode": "HYBRID",
+        "message": "Execution mode update to HYBRID failed",
+        "error": "ExecutionAgent not initialized",
+        "detail": "ExecutionAgent not initialized",
+    }
 
 
 def test_set_trading_mode_route_updates_settings_and_cache(monkeypatch):

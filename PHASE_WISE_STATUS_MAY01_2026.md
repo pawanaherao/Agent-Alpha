@@ -2,9 +2,9 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options, account, execution-broker, and market-data boundaries.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `139 passed`.
-- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `404 passed`.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options, account, trading execution-mode, execution-broker, and market-data boundaries.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `141 passed`.
+- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `406 passed`.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -28,6 +28,8 @@ Completed in the current hardening wave:
 - `/api/user/watchlist` setter now preserves the sanitized symbol payload when cache persistence fails, instead of surfacing a cache-write exception.
 - `/api/market/quote/{symbol}` now preserves the normal quote envelope when the yfinance fallback fails, instead of collapsing to a partial error-only payload.
 - `/api/account/fund-limits` now preserves a shape-safe Dhan payload with an explicit error field when the fund-limits fetch fails, instead of surfacing a route exception.
+- `/api/trading/execution-mode` now preserves the execution-mode selector contract with an explicit error field when runtime lookup fails, instead of collapsing to a tuple-style error response.
+- `POST /api/trading/execution-mode` now accepts the JSON body shape used by the settings UI and returns a structured failure payload with explicit error fields when updates fail, instead of relying on query-only input and tuple-style errors.
 - `/api/broker/execution-broker` now preserves the full selector contract with an explicit error field when execution-router config resolution fails, instead of collapsing to a tuple-style error response.
 - `/options/chain/{symbol}` now survives malformed chain metadata during response shaping, instead of rethrowing while building its fallback payload.
 - `POST /api/broker/execution-broker` now returns a structured update payload with explicit error fields and a real HTTP failure status when override persistence fails, instead of a malformed tuple-style response.
@@ -41,7 +43,7 @@ Current assessment:
 
 - Extracted operator/public runtime endpoints are materially more fault-tolerant than at the start of this wave.
 - Success payload contracts were kept stable while exceptions were converted into explicit fallback payloads.
-- Router regression coverage has grown incrementally with each slice and is currently green at `139` passing checks.
+- Router regression coverage has grown incrementally with each slice and is currently green at `141` passing checks.
 
 ## Phase 3 — Runtime Authority And Freshness
 
@@ -69,9 +71,9 @@ Status: gated, 0%
 
 ## Latest Slice
 
-- Hardened `POST /api/broker/execution-broker` in `backend/src/api/execution_broker_router.py` so override-write failures now return a structured update payload with explicit error fields and a real HTTP failure status instead of a malformed tuple-style response.
-- Added focused regression coverage for execution-broker override failure handling.
-- Confirmed the current validated baseline in this worktree at `139` router regressions and `404` full backend tests.
+- Hardened the execution-mode routes in `backend/src/api/trading_mode_router.py` so `GET /api/trading/execution-mode` now preserves its selector contract on runtime lookup failures and `POST /api/trading/execution-mode` accepts the JSON body shape used by the settings UI while returning structured failure payloads on update errors.
+- Added focused regression coverage for execution-mode fallback handling, JSON-body updates, and missing-agent failures.
+- Confirmed the current validated baseline in this worktree at `141` router regressions and `406` full backend tests.
 
 ## Next Slice Candidates
 

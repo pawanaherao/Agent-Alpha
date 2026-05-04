@@ -107,6 +107,15 @@ def _build_router_app(router_module):
     return app
 
 
+@pytest.fixture(autouse=True)
+def _reset_public_health_snapshot_cache():
+    public_status_router._health_snapshot_payload = None
+    public_status_router._health_snapshot_expires_at = 0.0
+    yield
+    public_status_router._health_snapshot_payload = None
+    public_status_router._health_snapshot_expires_at = 0.0
+
+
 def test_record_command_appends_and_filters_command_journal(monkeypatch):
     fake_cache = FakeCache()
     monkeypatch.setattr(postgres_db, "pool", None)
@@ -1176,6 +1185,50 @@ def test_public_health_route_falls_back_when_vertex_status_raises(monkeypatch):
         "location": "fallback-location",
         "model": "fallback-model",
     }
+
+
+def test_public_health_route_reuses_short_lived_snapshot(monkeypatch):
+    fake_agent_manager = SimpleNamespace(is_running=True)
+    status_calls = {"count": 0}
+    fake_clock = {"now": 100.0}
+
+    def _status():
+        status_calls["count"] += 1
+        return {
+            "available": True,
+            "project": "status-project",
+            "location": "status-location",
+            "default_model": "status-model",
+        }
+
+    fake_vertex_client = SimpleNamespace(
+        status=_status,
+        is_available=lambda: True,
+        _project="fallback-project",
+        _location="fallback-location",
+        _default_model_name="fallback-model",
+    )
+
+    monkeypatch.setattr(
+        public_status_router,
+        "get_runtime_value",
+        lambda key, default=None: fake_agent_manager if key == "agent_manager" else default,
+    )
+    monkeypatch.setattr(public_status_router, "is_market_open", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(public_status_router.db, "pool", object(), raising=False)
+    monkeypatch.setattr(public_status_router.cache, "client", object(), raising=False)
+    monkeypatch.setattr(public_status_router, "_get_health_snapshot_now", lambda: fake_clock["now"])
+    monkeypatch.setattr("src.services.vertex_ai_client.vertex_ai_client", fake_vertex_client)
+
+    client = TestClient(_build_router_app(public_status_router))
+    first = client.get("/health")
+    fake_clock["now"] = 100.5
+    second = client.get("/health")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() == second.json()
+    assert status_calls["count"] == 1
 
 
 def test_public_metrics_route_returns_exported_text(monkeypatch):

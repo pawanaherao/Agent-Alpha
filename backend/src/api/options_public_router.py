@@ -98,6 +98,14 @@ async def options_chain(symbol: str, num_strikes: int = 10, greeks: bool = True)
     """Live option chain with Greeks for a symbol."""
     from src.services.option_chain import option_chain_service
 
+    def _safe_list(value):
+        if value is None:
+            return []
+        try:
+            return list(value)
+        except TypeError:
+            return []
+
     chain = None
     try:
         chain = await option_chain_service.get_chain(
@@ -105,21 +113,21 @@ async def options_chain(symbol: str, num_strikes: int = 10, greeks: bool = True)
             num_strikes=num_strikes,
             enrich_greeks=greeks,
         )
-        raw_items = list(getattr(chain, "items", []) or [])
+        raw_items = _safe_list(getattr(chain, "items", []) or [])
         return {
             "symbol": getattr(chain, "symbol", symbol),
             "spot_price": getattr(chain, "spot_price", None),
-            "expiry_dates": list(getattr(chain, "expiry_dates", []) or []),
+            "expiry_dates": _safe_list(getattr(chain, "expiry_dates", []) or []),
             "atm_strike": getattr(chain, "atm_strike", None),
             "items_count": len(raw_items),
             "items": [item.dict() for item in raw_items[:50]],
         }
     except Exception as exc:
-        raw_items = list(getattr(chain, "items", []) or []) if chain else []
+        raw_items = _safe_list(getattr(chain, "items", []) or []) if chain else []
         return {
             "symbol": getattr(chain, "symbol", symbol),
             "spot_price": getattr(chain, "spot_price", None),
-            "expiry_dates": list(getattr(chain, "expiry_dates", []) or []),
+            "expiry_dates": _safe_list(getattr(chain, "expiry_dates", []) or []),
             "atm_strike": getattr(chain, "atm_strike", None),
             "items_count": len(raw_items),
             "items": [],

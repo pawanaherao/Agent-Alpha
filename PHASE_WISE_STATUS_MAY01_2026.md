@@ -2,9 +2,9 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options boundaries and market-data quote or watchlist surfaces.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `137 passed`.
-- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `405 passed`.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options, account, execution-broker, and market-data boundaries.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `138 passed`.
+- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `406 passed`.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -29,6 +29,7 @@ Completed in the current hardening wave:
 - `/api/market/quote/{symbol}` now preserves the normal quote envelope when the yfinance fallback fails, instead of collapsing to a partial error-only payload.
 - `/api/account/fund-limits` now preserves a shape-safe Dhan payload with an explicit error field when the fund-limits fetch fails, instead of surfacing a route exception.
 - `/api/broker/execution-broker` now preserves the full selector contract with an explicit error field when execution-router config resolution fails, instead of collapsing to a tuple-style error response.
+- `/options/chain/{symbol}` now survives malformed chain metadata during response shaping, instead of rethrowing while building its fallback payload.
 - `/ai/status` now survives ai_router initialize/status failures plus vertex/cost status failures while preserving the normal success contract.
 - `/positions` now survives broker client creation failures, broker-name failures, and per-position policy snapshot failures while still returning the broader positions payload.
 - `/trades` now survives broker client creation failures, broker-name failures, and trade-fetch failures with a safe empty response.
@@ -39,7 +40,7 @@ Current assessment:
 
 - Extracted operator/public runtime endpoints are materially more fault-tolerant than at the start of this wave.
 - Success payload contracts were kept stable while exceptions were converted into explicit fallback payloads.
-- Router regression coverage has grown incrementally with each slice and is currently green at `137` passing checks.
+- Router regression coverage has grown incrementally with each slice and is currently green at `138` passing checks.
 
 ## Phase 3 — Runtime Authority And Freshness
 
@@ -60,9 +61,9 @@ Status: stable, green
 
 ## Latest Slice
 
-- Hardened `GET /api/broker/execution-broker` in `backend/src/api/execution_broker_router.py` so execution-router config failures no longer collapse the selector payload.
-- Added a shape-safe execution-broker fallback that preserves the selector contract fields, options list, and broker notes while attaching an explicit `error` field.
-- Added focused regression coverage for execution-router failure handling in the broker selector route.
+- Hardened `/options/chain/{symbol}` in `backend/src/api/options_public_router.py` so malformed chain metadata no longer rethrows while the route is building its fallback payload.
+- Added safe iterable normalization for `items` and `expiry_dates`, preserving the normal chain contract when metadata is malformed instead of surfacing a route exception.
+- Added focused regression coverage for malformed chain metadata handling.
 
 ## Next Slice Candidates
 

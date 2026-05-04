@@ -1369,6 +1369,33 @@ def test_options_chain_route_returns_safe_fallback_when_fetch_fails(monkeypatch)
     fake_service.get_chain.assert_awaited_once_with("NIFTY", num_strikes=10, enrich_greeks=True)
 
 
+def test_options_chain_route_returns_safe_fallback_when_chain_metadata_is_malformed(monkeypatch):
+    fake_chain = SimpleNamespace(
+        symbol="NIFTY",
+        spot_price=22345.0,
+        expiry_dates=object(),
+        atm_strike=22350,
+        items=[],
+    )
+    fake_service = SimpleNamespace(get_chain=AsyncMock(return_value=fake_chain))
+
+    monkeypatch.setattr("src.services.option_chain.option_chain_service", fake_service)
+
+    client = TestClient(_build_router_app(options_public_router))
+    response = client.get("/options/chain/NIFTY")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbol": "NIFTY",
+        "spot_price": 22345.0,
+        "expiry_dates": [],
+        "atm_strike": 22350,
+        "items_count": 0,
+        "items": [],
+    }
+    fake_service.get_chain.assert_awaited_once_with("NIFTY", num_strikes=10, enrich_greeks=True)
+
+
 def test_options_greeks_route_returns_position_snapshot(monkeypatch):
     fake_position = SimpleNamespace(
         legs=[{"symbol": "NIFTY24000CE"}, {"symbol": "NIFTY22000PE"}],
@@ -1434,6 +1461,34 @@ def test_options_validate_route_reports_validator_config(monkeypatch):
     )
 
     client = TestClient(_build_router_app(options_public_router))
+    def test_options_chain_route_returns_safe_fallback_when_chain_metadata_is_malformed(monkeypatch):
+        fake_chain = SimpleNamespace(
+            symbol="NIFTY",
+            spot_price=22345.0,
+            expiry_dates=object(),
+            atm_strike=22350,
+            items=[],
+        )
+        fake_service = SimpleNamespace(get_chain=AsyncMock(return_value=fake_chain))
+
+        monkeypatch.setattr("src.services.option_chain.option_chain_service", fake_service)
+
+        client = TestClient(_build_router_app(options_public_router))
+        response = client.get("/options/chain/NIFTY")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "symbol": "NIFTY",
+            "spot_price": 22345.0,
+            "expiry_dates": [],
+            "atm_strike": 22350,
+            "items_count": 0,
+            "items": [],
+            "error": "'object' object is not iterable",
+        }
+        fake_service.get_chain.assert_awaited_once_with("NIFTY", num_strikes=10, enrich_greeks=True)
+
+
     response = client.get("/options/validate")
 
     assert response.status_code == 200

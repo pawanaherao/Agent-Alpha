@@ -2032,6 +2032,18 @@ def test_get_user_watchlist_route_returns_cached_symbols(monkeypatch):
     assert response.json() == {"symbols": ["NIFTY 50", "INFY"]}
 
 
+def test_get_user_watchlist_route_falls_back_when_cache_payload_is_corrupted(monkeypatch):
+    fake_cache = FakeCache()
+    fake_cache.store["user_watchlist"] = "{not-json"
+    monkeypatch.setattr(market_data_router, "cache", fake_cache)
+
+    client = TestClient(_build_router_app(market_data_router))
+    response = client.get("/api/user/watchlist")
+
+    assert response.status_code == 200
+    assert response.json() == {"symbols": list(market_data_router.DEFAULT_WATCHLIST)}
+
+
 def test_set_user_watchlist_route_sanitizes_and_persists_symbols(monkeypatch):
     fake_cache = FakeCache()
     monkeypatch.setattr(market_data_router, "cache", fake_cache)

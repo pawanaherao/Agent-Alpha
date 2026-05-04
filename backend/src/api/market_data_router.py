@@ -264,10 +264,13 @@ async def get_user_watchlist():
     """Return the user's saved watchlist symbols."""
     import json as _json
 
-    raw = await cache.get("user_watchlist")
-    if raw:
-        symbols = _json.loads(raw)
-    else:
+    try:
+        raw = await cache.get("user_watchlist")
+        if raw:
+            symbols = _json.loads(raw)
+        else:
+            symbols = list(DEFAULT_WATCHLIST)
+    except Exception:
         symbols = list(DEFAULT_WATCHLIST)
     return {"symbols": symbols}
 

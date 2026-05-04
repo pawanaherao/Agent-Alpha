@@ -3,8 +3,8 @@
 ## Current Snapshot
 
 - Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options boundaries and market-data quote or watchlist surfaces.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `135 passed`.
-- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `403 passed`.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `136 passed`.
+- Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `404 passed`.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -27,6 +27,7 @@ Completed in the current hardening wave:
 - `/api/user/watchlist` now falls back to the default watchlist when the cached payload is unavailable or corrupted, instead of surfacing a cache or JSON parse exception.
 - `/api/user/watchlist` setter now preserves the sanitized symbol payload when cache persistence fails, instead of surfacing a cache-write exception.
 - `/api/market/quote/{symbol}` now preserves the normal quote envelope when the yfinance fallback fails, instead of collapsing to a partial error-only payload.
+- `/api/account/fund-limits` now preserves a shape-safe Dhan payload with an explicit error field when the fund-limits fetch fails, instead of surfacing a route exception.
 - `/ai/status` now survives ai_router initialize/status failures plus vertex/cost status failures while preserving the normal success contract.
 - `/positions` now survives broker client creation failures, broker-name failures, and per-position policy snapshot failures while still returning the broader positions payload.
 - `/trades` now survives broker client creation failures, broker-name failures, and trade-fetch failures with a safe empty response.
@@ -37,7 +38,7 @@ Current assessment:
 
 - Extracted operator/public runtime endpoints are materially more fault-tolerant than at the start of this wave.
 - Success payload contracts were kept stable while exceptions were converted into explicit fallback payloads.
-- Router regression coverage has grown incrementally with each slice and is currently green at `135` passing checks.
+- Router regression coverage has grown incrementally with each slice and is currently green at `136` passing checks.
 
 ## Phase 3 — Runtime Authority And Freshness
 
@@ -58,9 +59,9 @@ Status: stable, green
 
 ## Latest Slice
 
-- Hardened the `/api/user/watchlist` setter in `backend/src/api/market_data_router.py` so cache-write failures no longer surface route exceptions.
-- Added a shape-safe setter fallback that still returns the sanitized `{"symbols": [...]}` payload alongside an explicit `error` field when persistence fails.
-- Added focused regression coverage for cache-write failure handling in the watchlist setter.
+- Hardened `/api/account/fund-limits` in `backend/src/api/account_router.py` so Dhan fetch failures no longer surface route exceptions after the connection check passes.
+- Added a shape-safe Dhan fallback that preserves `source` and `data` while attaching an explicit `error` field when the fund-limits read fails.
+- Added focused regression coverage for Dhan fund-limits fetch failure handling.
 
 ## Next Slice Candidates
 

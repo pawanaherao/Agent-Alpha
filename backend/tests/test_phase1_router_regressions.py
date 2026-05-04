@@ -3064,6 +3064,24 @@ def test_account_fund_limits_route_returns_error_when_dhan_disconnected(monkeypa
     assert response.json() == {"error": "DhanHQ not connected", "data": {}}
 
 
+def test_account_fund_limits_route_returns_safe_fallback_when_dhan_fetch_fails(monkeypatch):
+    fake_client = SimpleNamespace(
+        is_connected=lambda: True,
+        get_fund_limits_data=AsyncMock(side_effect=RuntimeError("fund limits unavailable")),
+    )
+    monkeypatch.setitem(sys.modules, "src.services.dhan_client", SimpleNamespace(get_dhan_client=lambda: fake_client))
+
+    client = TestClient(_build_router_app(account_router))
+    response = client.get("/api/account/fund-limits")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "source": "dhan",
+        "error": "fund limits unavailable",
+        "data": {},
+    }
+
+
 def test_account_holdings_route_returns_active_broker_holdings(monkeypatch):
     fake_client = SimpleNamespace(
         is_connected=lambda: True,

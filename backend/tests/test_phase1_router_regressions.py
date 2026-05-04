@@ -2187,6 +2187,57 @@ def test_get_execution_broker_route_returns_current_config(monkeypatch):
     fake_execution_router.get_current_config.assert_awaited_once_with(vix=18.5)
 
 
+def test_get_execution_broker_route_returns_safe_fallback_when_router_fails(monkeypatch):
+    fake_cache = FakeCache()
+    fake_cache.store["current_vix"] = "18.5"
+    fake_execution_router = SimpleNamespace(
+        get_current_config=AsyncMock(side_effect=RuntimeError("execution router unavailable"))
+    )
+    monkeypatch.setattr(execution_broker_router, "cache", fake_cache)
+    monkeypatch.setattr(execution_broker_router, "execution_router", fake_execution_router)
+
+    client = TestClient(_build_router_app(execution_broker_router))
+    response = client.get("/api/broker/execution-broker")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "execution_broker": "auto",
+        "effective_broker": "dhan",
+        "data_broker": "dhan",
+        "data_broker_name": "DhanHQ",
+        "vix": 18.5,
+        "options": [
+            {
+                "id": "auto",
+                "label": "Auto (Smart Routing)",
+                "description": "Strategy-aware: speed-critical orders -> DhanHQ, others -> Kotak",
+                "cost": "Mixed",
+                "icon": "🔄",
+            },
+            {
+                "id": "dhan",
+                "label": "DhanHQ",
+                "description": "Fastest API. Use for high-volatility or intraday scalping.",
+                "cost": "₹499/month subscription + per-order charges",
+                "icon": "⚡",
+            },
+            {
+                "id": "kotak",
+                "label": "Kotak Neo",
+                "description": "Free execution API. Best for swing, positional, and most options.",
+                "cost": "FREE",
+                "icon": "🆓",
+            },
+        ],
+        "routing_note": "Execution broker configuration temporarily unavailable; falling back to Auto routing with DhanHQ data feeds.",
+        "audit_note": (
+            "Each order carries execution_broker in its SEBI audit log. "
+            "Switching broker does NOT affect open positions (exits route to their entry broker)."
+        ),
+        "error": "execution router unavailable",
+    }
+
+
 def test_set_execution_broker_route_updates_override(monkeypatch):
     fake_execution_router = SimpleNamespace(set_override=AsyncMock())
     monkeypatch.setattr(execution_broker_router, "execution_router", fake_execution_router)

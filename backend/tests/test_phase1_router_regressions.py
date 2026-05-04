@@ -1989,6 +1989,37 @@ def test_market_watchlist_route_uses_yfinance_proxy_for_midcpnifty(monkeypatch):
     assert captured["ticker_symbol"] == "^NSEMDCP50"
 
 
+def test_market_watchlist_route_returns_safe_item_when_dhan_quote_row_is_malformed(monkeypatch):
+    fake_dhan_client = SimpleNamespace(
+        is_connected=lambda: True,
+        get_batch_quotes=AsyncMock(return_value={"NIFTY": "bad-row"}),
+    )
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(Ticker=object))
+    monkeypatch.setattr(market_data_router, "settings", SimpleNamespace(PAPER_TRADING=False, MODE="LIVE"))
+    monkeypatch.setattr("src.services.dhan_client.get_dhan_client", lambda: fake_dhan_client)
+    monkeypatch.setattr(market_data_router, "_get_kotak_ltp_map", AsyncMock(return_value={}))
+
+    client = TestClient(_build_router_app(market_data_router))
+    response = client.get("/api/market/watchlist?symbols=NIFTY")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "watchlist": [
+            {
+                "symbol": "NIFTY",
+                "price": 0,
+                "change": 0,
+                "change_pct": 0,
+                "up": False,
+                "source": "none",
+                "error": "No live feed from Dhan/Kotak (yfinance disabled outside backtest)",
+            }
+        ],
+        "count": 1,
+    }
+
+
 def test_get_user_watchlist_route_returns_cached_symbols(monkeypatch):
     fake_cache = FakeCache()
     fake_cache.store["user_watchlist"] = json.dumps(["NIFTY 50", "INFY"])

@@ -2415,6 +2415,35 @@ def test_get_broker_status_route_returns_connection_snapshot(monkeypatch):
     }
 
 
+def test_get_broker_status_route_returns_safe_fallback_when_client_creation_fails(monkeypatch):
+    monkeypatch.setattr(
+        "src.services.broker_factory.get_broker_client",
+        Mock(side_effect=RuntimeError("broker factory unavailable")),
+    )
+    monkeypatch.setattr(broker_management_router.settings, "PAPER_TRADING", True, raising=False)
+    monkeypatch.setenv("BROKER", "kotak")
+    monkeypatch.setenv("BROKER_FALLBACK", "dhan")
+
+    client = TestClient(_build_router_app(broker_management_router))
+    response = client.get("/api/broker/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "broker": "kotak",
+        "brokerName": "Kotak Neo",
+        "connected": False,
+        "paperTrading": True,
+        "fallbackBroker": "dhan",
+        "failoverEnabled": True,
+        "availableBrokers": [
+            {"id": "dhan", "name": "DhanHQ", "cost": "Rs.499/month", "apiDocs": "https://dhanhq.co"},
+            {"id": "kotak", "name": "Kotak Neo", "cost": "FREE", "apiDocs": "https://kotakneo.kotaksecurities.com"},
+        ],
+        "error": "broker factory unavailable",
+        "lastError": "broker factory unavailable",
+    }
+
+
 def test_switch_broker_route_accepts_json_body_and_updates_cache(monkeypatch):
     fake_cache = FakeCache()
     reset_client = Mock()
@@ -2433,6 +2462,32 @@ def test_switch_broker_route_accepts_json_body_and_updates_cache(monkeypatch):
         "message": "Switched to kotak. Reconnect to apply.",
     }
     assert fake_cache.store["active_broker"] == "kotak"
+    reset_client.assert_called_once_with()
+
+
+def test_switch_broker_route_returns_safe_payload_and_restores_env_when_reset_fails(monkeypatch):
+    fake_cache = FakeCache()
+    reset_client = Mock(side_effect=RuntimeError("broker reset failed"))
+
+    monkeypatch.setattr(broker_management_router, "cache", fake_cache)
+    monkeypatch.setattr(broker_management_router.settings, "PAPER_TRADING", True, raising=False)
+    monkeypatch.setattr("src.services.broker_factory.reset_broker_client", reset_client)
+    monkeypatch.setenv("BROKER", "dhan")
+
+    client = TestClient(_build_router_app(broker_management_router))
+    response = client.post("/api/broker/switch", json={"broker": "kotak"})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "success": False,
+        "broker": "kotak",
+        "brokerName": "Kotak Neo",
+        "message": "Broker switch to Kotak Neo failed.",
+        "error": "broker reset failed",
+        "detail": "broker reset failed",
+    }
+    assert os.environ["BROKER"] == "dhan"
+    assert "active_broker" not in fake_cache.store
     reset_client.assert_called_once_with()
 
 

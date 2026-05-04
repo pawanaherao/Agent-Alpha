@@ -1,11 +1,36 @@
 import asyncio
 import logging
 import json
+from datetime import date, datetime, time
 import redis.asyncio as redis
-from typing import Dict, List, Callable, Awaitable, Any
+from typing import Dict, List, Callable, Awaitable, Any, Set
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_json_payload(value: Any) -> Any:
+    """
+    Coerce common runtime scalar types (NumPy/Pandas/date-like) into
+    stdlib-json-safe values before publishing through Redis.
+    """
+    if isinstance(value, dict):
+        return {key: _normalize_json_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_normalize_json_payload(item) for item in value]
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        try:
+            return _normalize_json_payload(value.item())
+        except Exception:
+            return value
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, bytearray)):
+        try:
+            return _normalize_json_payload(value.tolist())
+        except Exception:
+            return value
+    return value
 
 class RedisEventBus:
     """
@@ -17,8 +42,12 @@ class RedisEventBus:
         self.redis_url = f"redis://{settings.REDIS_HOST}:6379"
         self.pub_client = None
         self.sub_client = None
+        self.pubsub = None
         self.listen_task = None
         self.is_connected = False
+        self._subscribed_channels: Set[str] = set()
+        self._pending_channels: Set[str] = set()
+        self._subscription_tasks: Set[asyncio.Task] = set()
 
     async def connect(self):
         """Initialize Redis connections."""
@@ -34,10 +63,9 @@ class RedisEventBus:
             await self.pub_client.ping()
             self.is_connected = True
             
-            # B22 fix: Subscribe to all channels that were registered before connect()
+            # Subscribe to all channels that were registered before connect().
             for event_type in self.subscribers:
-                await self.pubsub.subscribe(event_type)
-                logger.debug(f"Redis channel subscribed: {event_type}")
+                await self._subscribe_channel(event_type)
             
             # Start listener loop
             self.listen_task = asyncio.create_task(self._listener())
@@ -51,11 +79,16 @@ class RedisEventBus:
         """Close Redis connections."""
         if self.listen_task:
             self.listen_task.cancel()
+        for task in list(self._subscription_tasks):
+            task.cancel()
         if self.pub_client:
             await self.pub_client.close()
         if self.sub_client:
             await self.sub_client.close()
         self.is_connected = False
+        self._subscribed_channels.clear()
+        self._pending_channels.clear()
+        self._subscription_tasks.clear()
 
     def subscribe(self, event_type: str, callback: Callable[[Dict[str, Any]], Awaitable[None]]):
         """
@@ -67,10 +100,50 @@ class RedisEventBus:
             self.subscribers[event_type] = []
             
         self.subscribers[event_type].append(callback)
-        
+
+        # If Redis is already connected, subscribe this channel immediately so
+        # post-startup subscribers do not miss published events.
+        if self.is_connected and self.pubsub:
+            self._schedule_channel_subscription(event_type)
+
         # Note: actual Redis channel subscription is deferred to connect()
-        # or first publish, since subscribe() must be sync to match EventBus API.
+        # when subscribe() is called before the bus comes online.
         logger.debug(f"Registered subscriber for Redis channel: {event_type}")
+
+    async def _subscribe_channel(self, event_type: str):
+        if not self.is_connected or not self.pubsub:
+            return
+        if event_type in self._subscribed_channels:
+            return
+
+        await self.pubsub.subscribe(event_type)
+        self._subscribed_channels.add(event_type)
+        logger.debug(f"Redis channel subscribed: {event_type}")
+
+    def _schedule_channel_subscription(self, event_type: str):
+        if event_type in self._subscribed_channels or event_type in self._pending_channels:
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        self._pending_channels.add(event_type)
+        task = loop.create_task(self._subscribe_channel(event_type))
+        self._subscription_tasks.add(task)
+
+        def _finalize_subscription(subscription_task: asyncio.Task):
+            self._subscription_tasks.discard(subscription_task)
+            self._pending_channels.discard(event_type)
+            try:
+                subscription_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.error(f"Failed to subscribe Redis channel {event_type}: {exc}")
+
+        task.add_done_callback(_finalize_subscription)
 
     async def publish(self, event_type: str, data: Dict[str, Any]):
         """
@@ -78,7 +151,7 @@ class RedisEventBus:
         """
         if self.is_connected:
             try:
-                payload = json.dumps(data)
+                payload = json.dumps(_normalize_json_payload(data))
                 await self.pub_client.publish(event_type, payload)
             except Exception as e:
                 logger.error(f"Redis publish error: {e}")

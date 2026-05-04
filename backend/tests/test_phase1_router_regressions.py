@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 from datetime import timedelta
 
 import pytest
+import numpy as np
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -4229,6 +4230,29 @@ def test_redis_event_bus_subscribe_after_connect_registers_channel_once():
 
     assert bus.pubsub.channels == ["SIGNALS_GENERATED"]
     assert bus._subscribed_channels == {"SIGNALS_GENERATED"}
+
+
+def test_redis_event_bus_publish_normalizes_numpy_scalars_before_json_encoding():
+    bus = event_bus_redis_module.RedisEventBus()
+    bus.is_connected = True
+    bus.pub_client = SimpleNamespace(publish=AsyncMock())
+
+    payload = {
+        "flag": np.bool_(True),
+        "count": np.int64(3),
+        "nested": [{"score": np.float64(1.25)}],
+    }
+
+    asyncio.run(bus.publish("SCAN_COMPLETE", payload))
+
+    bus.pub_client.publish.assert_awaited_once()
+    event_type, encoded_payload = bus.pub_client.publish.await_args.args
+    assert event_type == "SCAN_COMPLETE"
+    assert json.loads(encoded_payload) == {
+        "flag": True,
+        "count": 3,
+        "nested": [{"score": 1.25}],
+    }
 
 
 def test_base_agent_publish_event_uses_live_event_bus_resolver(monkeypatch):

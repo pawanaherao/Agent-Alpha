@@ -5,9 +5,9 @@
 - Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, including shape-safe fallbacks across public options, account, broker-management, authenticated control history, trading execution-mode, execution-broker, and market-data boundaries.
 - Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `145 passed`.
 - Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `410 passed`.
-- Latest slice validation (2026-05-04): `python -m pytest backend/tests/test_phase1_router_regressions.py -k "public_health_route_reports_runtime_and_dependency_state or public_health_route_uses_vertex_status_contract_when_available or public_health_route_does_not_eagerly_call_legacy_vertex_availability or public_health_route_falls_back_when_vertex_status_raises or public_health_route_reuses_short_lived_snapshot"` -> `5 passed`.
+- Latest slice validation (2026-05-04): bounded port `8063` re-probe against a relaunched validation instance returned `POST /trigger-cycle -> 200`, `/api/system/telemetry -> 200`, and `/health -> 200` while telemetry reported `cycle_status=in_progress`, `current_phase=sensing`, and `cycle_timing_health.total_ms ≈ 34,092` during the forced cycle.
 - Latest live market validation (2026-05-04 14:37 IST): bounded port `8063` probe reached `/health` healthy with `market_open=true` in `PAPER_TRADING=True`, Dhan MarketFeed connected before companion sockets, 20-level depth subscribed successfully, and `/api/charts/volume-profile/{symbol}` returned non-null OFI for `RELIANCE`, `HDFCBANK`, and `ITC` with `levels_with_data=40`.
-- Latest live runtime findings: `/api/system/telemetry` reported the active cycle in `decision` with `sensing` still the dominant bottleneck, the first `/health` and `/api/system/telemetry` reads timed out under live-cycle load before succeeding on wider retry windows, the Redis bool-serialization warning is now closed, the telemetry route now prefers cached `session_telemetry` plus batched Redis reads, and `/health` now serves a short-lived cached snapshot to reduce repeated probe work during active cycles. A fresh live re-probe is still pending before the endpoint responsiveness backlog can be reduced.
+- Latest live runtime findings: `/api/system/telemetry` reported the active cycle in `decision` with `sensing` still the dominant bottleneck, the first `/health` and `/api/system/telemetry` reads timed out under live-cycle load before succeeding on wider retry windows, the Redis bool-serialization warning is now closed, the telemetry route now prefers cached `session_telemetry` plus batched Redis reads, and `/health` now serves a short-lived cached snapshot to reduce repeated probe work during active cycles. A bounded after-hours forced-cycle re-probe on the same port now shows both `/health` and `/api/system/telemetry` staying responsive at `200` while sensing is in progress, but a fresh market-hours live-cycle re-probe is still pending before the endpoint responsiveness backlog can be reduced.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -68,7 +68,7 @@ Status: stable, green
 - Earlier slices removed stale Vertex/Gemini scaffolding from execution, scanner, strategy, universal strategy, sentiment module-level wiring, and option-chain advisory paths while preserving intentional dynamic guard paths where required.
 - Phase 4 ai_router and latency guard suites remain green across execution, sentiment, universal strategy, option-chain, vertex client, scanner, strategy, and market-data related tests.
 - A fresh market-hours probe on port `8063` re-confirmed the current build's live Phase 4 feed path: `/health` returned `healthy` with `market_open=true`, Dhan MarketFeed connected before companion sockets, 20-level depth subscribed, and route-level OFI was non-null for `RELIANCE`, `HDFCBANK`, and `ITC`.
-- The same live run showed the remaining runtime issues are still wall-clock and observability related rather than feed-health related: telemetry reported `cycle_status=in_progress` in `decision` with `sensing` as the bottleneck and initial lightweight health and telemetry reads timed out once under load. Follow-up Phase 4 slices closed the scanner/event-bus Redis bool-serialization warning, reduced `/api/system/telemetry` live-cycle coupling by preferring the persisted `session_telemetry` snapshot plus batched Redis reads, and now add a short-lived `/health` snapshot so repeated probes do less work while orchestration is active.
+- The same live run showed the remaining runtime issues are still wall-clock and observability related rather than feed-health related: telemetry reported `cycle_status=in_progress` in `decision` with `sensing` as the bottleneck and initial lightweight health and telemetry reads timed out once under load. Follow-up Phase 4 slices closed the scanner/event-bus Redis bool-serialization warning, reduced `/api/system/telemetry` live-cycle coupling by preferring the persisted `session_telemetry` snapshot plus batched Redis reads, added a short-lived `/health` snapshot so repeated probes do less work while orchestration is active, and now revalidated both routes at `200` during an after-hours forced sensing cycle on the same validation instance.
 - Full-suite stability remains intact after each small resilience slice.
 
 ## Phase 5 — Text-Admin Copilot Foundation
@@ -81,12 +81,12 @@ Status: gated, 0%
 
 ## Latest Slice
 
-- Implemented the next bounded Phase 4 live-runtime cleanup slice in `backend/src/api/public_status_router.py` rather than widening into orchestration or feed code.
-- `/health` now serves a short-lived cached snapshot, which keeps the existing response contract but reduces repeated runtime and Vertex status work when liveness probes cluster during active cycles.
-- Added a focused regression in `backend/tests/test_phase1_router_regressions.py`; the targeted health slice is green at `5 passed`.
+- Completed the next bounded Phase 4 runtime-validation slice on the existing port `8063` validation path rather than widening directly into another code edit.
+- Relaunched the validation instance, forced an after-hours orchestration cycle with `POST /trigger-cycle`, and confirmed `/api/system/telemetry` stayed responsive at `200` while reporting `cycle_status=in_progress`, `current_phase=sensing`, and `cycle_timing_health.total_ms ≈ 34,092`.
+- Rechecked `/health` during the same in-progress cycle and it also stayed responsive at `200`, which reduces the remaining uncertainty to market-hours live-cycle behavior rather than idle or after-hours forced-cycle behavior.
 
 ## Next Slice Candidates
 
-- Re-run a bounded market-hours probe after the health and telemetry responsiveness slices to confirm `/health` and `/api/system/telemetry` stay responsive without widened retry windows.
-- If the re-probe still shows endpoint sensitivity, move one hop closer to the owner of live cycle wall-clock pressure rather than widening router hardening further.
+- Re-run a bounded market-hours probe after the health and telemetry responsiveness slices to confirm `/health` and `/api/system/telemetry` stay responsive without widened retry windows while live feeds and market-open orchestration are active.
+- If that market-hours re-probe still shows endpoint sensitivity, move one hop closer to the owner of live cycle wall-clock pressure rather than widening router hardening further.
 - Continue scanning extracted operator/public routes for any remaining direct dependency reads that can still escape fallback handling.

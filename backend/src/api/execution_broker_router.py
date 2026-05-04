@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from src.database.redis import cache
 from src.services.execution_router import execution_router
@@ -8,6 +9,12 @@ from src.services.execution_router import execution_router
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+BROKER_NAMES = {
+    "auto": "Auto Routing",
+    "dhan": "DhanHQ",
+    "kotak": "Kotak Neo",
+}
 
 
 def _execution_broker_fallback(vix: float, error: str | None = None) -> dict:
@@ -51,6 +58,29 @@ def _execution_broker_fallback(vix: float, error: str | None = None) -> dict:
     return payload
 
 
+def _execution_broker_update_payload(broker: str, error: str | None = None) -> dict:
+    broker_name = BROKER_NAMES.get(broker, broker)
+    payload = {
+        "success": error is None,
+        "execution_broker": broker,
+        "broker_name": broker_name,
+        "data_broker": "dhan",
+        "message": (
+            f"Execution broker set to {broker_name}. "
+            "Data feeds remain on DhanHQ. "
+            "Open positions route exits to their entry broker."
+            if error is None
+            else f"Execution broker update to {broker_name} failed. "
+            "Data feeds remain on DhanHQ. "
+            "Open positions route exits to their entry broker."
+        ),
+    }
+    if error:
+        payload["error"] = error
+        payload["detail"] = error
+    return payload
+
+
 @router.get("/api/broker/execution-broker")
 async def get_execution_broker():
     """Get current execution broker configuration for the frontend selector."""
@@ -71,25 +101,18 @@ async def get_execution_broker():
 @router.post("/api/broker/execution-broker")
 async def set_execution_broker(broker: str):
     """Set execution broker override for order routing."""
-    valid = ("auto", "dhan", "kotak")
+    valid = tuple(BROKER_NAMES.keys())
     if broker not in valid:
-        return {"error": f"broker must be one of {valid}"}, 400
+        error = f"broker must be one of {valid}"
+        return JSONResponse(status_code=400, content={"error": error, "detail": error})
 
     try:
         await execution_router.set_override(broker)
-        broker_name = {"auto": "Auto Routing", "dhan": "DhanHQ", "kotak": "Kotak Neo"}[broker]
         logger.info("Execution broker override set to: %s", broker)
-        return {
-            "success": True,
-            "execution_broker": broker,
-            "broker_name": broker_name,
-            "data_broker": "dhan",
-            "message": (
-                f"Execution broker set to {broker_name}. "
-                "Data feeds remain on DhanHQ. "
-                "Open positions route exits to their entry broker."
-            ),
-        }
+        return _execution_broker_update_payload(broker)
     except Exception as exc:
         logger.error(f"set_execution_broker failed: {exc}")
-        return {"error": str(exc)}, 500
+        return JSONResponse(
+            status_code=500,
+            content=_execution_broker_update_payload(broker, error=str(exc)),
+        )

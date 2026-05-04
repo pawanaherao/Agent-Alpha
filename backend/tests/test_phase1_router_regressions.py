@@ -2311,6 +2311,28 @@ def test_set_execution_broker_route_updates_override(monkeypatch):
     fake_execution_router.set_override.assert_awaited_once_with("kotak")
 
 
+def test_set_execution_broker_route_returns_safe_payload_when_override_fails(monkeypatch):
+    fake_execution_router = SimpleNamespace(
+        set_override=AsyncMock(side_effect=RuntimeError("execution router unavailable"))
+    )
+    monkeypatch.setattr(execution_broker_router, "execution_router", fake_execution_router)
+
+    client = TestClient(_build_router_app(execution_broker_router))
+    response = client.post("/api/broker/execution-broker?broker=kotak")
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "success": False,
+        "execution_broker": "kotak",
+        "broker_name": "Kotak Neo",
+        "data_broker": "dhan",
+        "message": "Execution broker update to Kotak Neo failed. Data feeds remain on DhanHQ. Open positions route exits to their entry broker.",
+        "error": "execution router unavailable",
+        "detail": "execution router unavailable",
+    }
+    fake_execution_router.set_override.assert_awaited_once_with("kotak")
+
+
 def test_get_broker_status_route_returns_connection_snapshot(monkeypatch):
     class FakeBrokerClient:
         def is_connected(self):

@@ -500,6 +500,35 @@ def test_system_telemetry_route_exposes_cycle_intelligence_health(monkeypatch):
     assert body["agent_manager_running"] is True
 
 
+def test_system_telemetry_route_prefers_cached_session_snapshot(monkeypatch):
+    fake_cache = FakeCache()
+    fake_cache.store["session_telemetry"] = json.dumps(
+        {
+            "cycles_completed": 19,
+            "cycle_errors": 2,
+            "last_updated": "2026-05-04T15:01:00",
+        }
+    )
+    fake_agent_manager = SimpleNamespace(agents={}, is_running=False, _session_stats={"cycles_completed": 3})
+
+    monkeypatch.setattr(system_observability_router, "cache", fake_cache)
+    monkeypatch.setattr(
+        system_observability_router,
+        "get_runtime_context",
+        lambda: {"agent_manager": fake_agent_manager},
+    )
+
+    client = TestClient(_build_router_app(system_observability_router))
+    response = client.get("/api/system/telemetry")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"] == {
+        "cycles_completed": 19,
+        "cycle_errors": 2,
+    }
+
+
 def test_system_telemetry_route_preserves_scanner_prefilter_metrics(monkeypatch):
     fake_cache = FakeCache()
     fake_agent_manager = SimpleNamespace(agents={}, is_running=False, _session_stats={})

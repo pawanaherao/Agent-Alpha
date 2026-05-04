@@ -2059,6 +2059,26 @@ def test_set_user_watchlist_route_sanitizes_and_persists_symbols(monkeypatch):
     assert json.loads(fake_cache.store["user_watchlist"]) == ["NIFTY 50", "RELIANCE", "INFY"]
 
 
+def test_set_user_watchlist_route_returns_symbols_when_cache_write_fails(monkeypatch):
+    class FailingCache:
+        async def set(self, key, value, ttl=None):
+            raise RuntimeError("cache unavailable")
+
+    monkeypatch.setattr(market_data_router, "cache", FailingCache())
+
+    client = TestClient(_build_router_app(market_data_router))
+    response = client.put(
+        "/api/user/watchlist",
+        json={"symbols": [" nifty 50 ", "RELIANCE", "reliance", 123, "", "infy"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbols": ["NIFTY 50", "RELIANCE", "INFY"],
+        "error": "cache unavailable",
+    }
+
+
 def test_market_depth_route_returns_broker_depth(monkeypatch):
     fake_broker = SimpleNamespace(
         get_market_depth=AsyncMock(return_value={"buy": [{"price": 100}], "sell": [{"price": 101}]}),

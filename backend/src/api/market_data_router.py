@@ -296,7 +296,11 @@ async def set_user_watchlist(body: dict):
         if len(clean) >= 20:
             break
 
-    await cache.set("user_watchlist", _json.dumps(clean), ttl=86400 * 365)
+    try:
+        await cache.set("user_watchlist", _json.dumps(clean), ttl=86400 * 365)
+    except Exception as exc:
+        return {"symbols": clean, "error": str(exc)}
+
     return {"symbols": clean}
 
 

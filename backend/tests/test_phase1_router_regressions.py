@@ -1521,6 +1521,40 @@ def test_option_dhan_chain_route_shapes_strikes(monkeypatch):
     assert body["strikes"][1]["ce"]["delta"] == 0.3
 
 
+def test_option_dhan_chain_route_returns_safe_fallback_when_payload_malformed(monkeypatch):
+    fake_dhan_client = SimpleNamespace(
+        get_expiry_list=AsyncMock(return_value=["2026-04-30"]),
+        get_option_chain_native=AsyncMock(
+            return_value={
+                "last_price": 22345,
+                "oc": {
+                    "bad-strike": {
+                        "ce": {"last_price": 100},
+                        "pe": {"last_price": 90},
+                    }
+                },
+            }
+        ),
+    )
+
+    monkeypatch.setattr("src.services.dhan_client.get_dhan_client", lambda: fake_dhan_client)
+
+    client = TestClient(_build_router_app(options_data_router))
+    response = client.get("/api/options/dhan-chain?symbol=NIFTY&atm_range=1")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbol": "NIFTY",
+        "expiry": "2026-04-30",
+        "spot_price": 0,
+        "atm_strike": 0,
+        "strikes": [],
+        "count": 0,
+        "source": "unavailable",
+        "error": "could not convert string to float: 'bad-strike'",
+    }
+
+
 def test_option_vp_context_route_maps_bridge_payload(monkeypatch):
     fake_context = SimpleNamespace(
         symbol="NIFTY",

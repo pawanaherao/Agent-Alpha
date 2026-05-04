@@ -1707,6 +1707,56 @@ def test_options_scan_route_shapes_decisions_for_frontend(monkeypatch):
     ]
 
 
+def test_options_scan_route_returns_shape_safe_defaults_for_malformed_decision(monkeypatch):
+    class FakeScanner:
+        def _default_fno_universe(self):
+            return ["NIFTY"]
+
+    class FakeDataService:
+        async def get_historical_data(self, symbol, period="1y", interval="1d"):
+            return list(range(25))
+
+    fake_decisions = [
+        SimpleNamespace(
+            symbol="NIFTY",
+            structure="IRON_CONDOR",
+            confidence=None,
+            iv_rank=None,
+            rationale=None,
+            legs=[{"strike": 22500}],
+        )
+    ]
+
+    monkeypatch.setattr("src.services.nse_data.NSEDataService", lambda *args, **kwargs: FakeDataService())
+    monkeypatch.setattr("src.strategies.options_setup_scanner.FnOSetupScanner", lambda *args, **kwargs: FakeScanner())
+    monkeypatch.setattr(
+        "src.strategies.options_setup_scanner.run_two_layer_scan",
+        AsyncMock(return_value=fake_decisions),
+    )
+
+    client = TestClient(_build_router_app(options_data_router))
+    response = client.post("/api/options-scan", json={})
+    expected_expiry = str((datetime.now() + timedelta(days=7)).date())
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "symbol": "NIFTY",
+            "structure": "IRON_CONDOR",
+            "score": 0,
+            "ivRank": 0.0,
+            "atmIv": 0.0,
+            "pcr": 1.0,
+            "atmStrike": 22500,
+            "spot": 0.0,
+            "expiry": expected_expiry,
+            "geminiAdvisory": None,
+            "riskProfile": "",
+            "legs": [{"strike": 22500}],
+        }
+    ]
+
+
 def test_tradingview_webhook_route_executes_trade_with_stripped_symbol(monkeypatch):
     execute_trade = AsyncMock()
     fake_exec_agent = SimpleNamespace(mode="HYBRID", execute_trade=execute_trade)

@@ -266,24 +266,44 @@ async def options_scan_route(request: Request):
         logger.error(f"/api/options-scan error: {exc}")
         return []
 
+    def _serialize_decision(decision):
+        legs = getattr(decision, "legs", [])
+        if not isinstance(legs, list):
+            legs = []
+
+        first_leg = legs[0] if legs and isinstance(legs[0], dict) else {}
+
+        try:
+            confidence = float(getattr(decision, "confidence", 0) or 0)
+        except Exception:
+            confidence = 0.0
+
+        try:
+            iv_rank = float(getattr(decision, "iv_rank", 0) or 0)
+        except Exception:
+            iv_rank = 0.0
+
+        rationale = getattr(decision, "rationale", None)
+        if not isinstance(rationale, str):
+            rationale = None
+
+        return {
+            "symbol": getattr(decision, "symbol", "") or "",
+            "structure": getattr(decision, "structure", "") or "",
+            "score": int(round(confidence * 100)),
+            "ivRank": round(iv_rank, 1),
+            "atmIv": round(iv_rank * 0.38, 1),
+            "pcr": 1.0,
+            "atmStrike": first_leg.get("strike", 0),
+            "spot": 0.0,
+            "expiry": first_leg.get("expiry", str(dt.date.today() + dt.timedelta(days=7))) if first_leg else "",
+            "geminiAdvisory": rationale[:120] if rationale else None,
+            "riskProfile": getattr(decision, "risk_profile", "") or "",
+            "legs": legs,
+        }
+
     out = []
     for decision in decisions:
-        atm_strike = decision.legs[0]["strike"] if decision.legs else 0
-        out.append(
-            {
-                "symbol": decision.symbol,
-                "structure": decision.structure,
-                "score": int(round(decision.confidence * 100)),
-                "ivRank": round(decision.iv_rank, 1),
-                "atmIv": round(decision.iv_rank * 0.38, 1),
-                "pcr": 1.0,
-                "atmStrike": atm_strike,
-                "spot": 0.0,
-                "expiry": decision.legs[0].get("expiry", str(dt.date.today() + dt.timedelta(days=7))) if decision.legs else "",
-                "geminiAdvisory": decision.rationale[:120] if decision.rationale else None,
-                "riskProfile": decision.risk_profile,
-                "legs": decision.legs,
-            }
-        )
+        out.append(_serialize_decision(decision))
 
     return out

@@ -2,11 +2,12 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, plus the next authenticated Phase 5 text-admin slice that moves mutating text commands behind an explicit approval queue on top of the existing manual-controls authority boundary.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, plus the adjacent Phase 5 controls-console slice that exposes text-admin preview and approval review on top of the existing manual-controls authority boundary.
 - Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `154 passed`.
 - Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `410 passed`.
 - Latest slice validation (2026-05-05): `python -m pytest tests/test_phase1_router_regressions.py -k "text_command" -q --tb=no` -> `6 passed`.
 - Latest adjacent validation (2026-05-05): `python -m pytest tests/test_phase1_router_regressions.py -k "command_journal_route or audit_log_route or text_command or equity_scanner_toggle_route_delegates_to_manual_controls" -q --tb=no` -> `10 passed`.
+- Latest frontend slice validation (2026-05-05): `npx eslint src/components/controls/OperationsControlPanel.tsx` -> clean.
 - Latest live market validation (2026-05-05): a fresh token-backed validation instance on port `8065` reached `/health` healthy with `market_open=true`, started Dhan MarketFeed before companion sockets, accepted `POST /api/controls/text-command` for `disable equity scanner` with `dry_run=false`, returned a `PENDING` approval request instead of mutating runtime, exposed that request through `GET /api/controls/text-command/approvals`, and cleared it through the authenticated reject path while the command journal recorded both the approval-request and rejection events.
 - Latest live runtime findings: the earlier fresh-start market-hours `8064` probe still showed one-time startup pressure on the first `/api/system/telemetry` and route-level OFI reads before a wider re-probe succeeded, which keeps the remaining live sensitivity narrowed to first-probe startup pressure rather than a persistent route failure. On the new `8065` instance, the approval-backed Phase 5 gateway proved the control-plane now queues mutating text commands for explicit review instead of executing them immediately, while preserving attributable journal history and avoiding runtime mutation during the live probe.
 
@@ -74,21 +75,22 @@ Status: stable, green
 
 ## Phase 5 — Text-Admin Copilot Foundation
 
-Status: active, 25%
+Status: active, 35%
 
-- The first two formal Phase 5 slices are now in code: authenticated `/api/controls/text-command` routing plus dedicated `/api/controls/text-command/approvals` review paths on top of the existing `admin_controls_router` and `manual_controls` authority boundary.
-- The gateway supports deterministic intent parsing plus dry-run plan rendering for a bounded command catalog, and mutating requests now queue for approval instead of executing immediately from the initial text-command submission.
+- The first three formal Phase 5 slices are now in code: authenticated `/api/controls/text-command` routing, dedicated `/api/controls/text-command/approvals` review paths, and an operator-facing controls-console surface on top of the existing `admin_controls_router` and `manual_controls` authority boundary.
+- The gateway supports deterministic intent parsing plus dry-run plan rendering for a bounded command catalog, mutating requests queue for approval instead of executing immediately from the initial text-command submission, and the controls console can now drive that queue without raw API calls.
+- The operations console now previews supported text commands, auto-refreshes pending approvals, approves or rejects them through the authenticated control plane, and refreshes the shared controls snapshot after approval so sibling controls stay aligned with applied mutations.
 - Preview, approval-request, rejection, and approval-resolution activity is journaled so text-admin actions are attributable and reviewable through the same authenticated control-plane history.
-- Remaining work is broader intent coverage, operator-facing approval UX polish, and a warmed market-hours approve-then-revert validation on an isolated instance.
+- Remaining work is broader intent coverage, richer reviewer ergonomics on top of the current controls-console queue, and a warmed market-hours approve-then-revert validation on an isolated instance.
 
 ## Latest Slice
 
-- Implemented the next adjacent Phase 5 text-admin slice in the authenticated control plane instead of allowing direct mutation from the initial text-command submission.
-- `manual_controls` still parses the bounded text-command catalog into deterministic plans and dry-run previews, but mutating requests now enter a dedicated approval queue with Redis-backed pending-request storage and execute only from explicit approval resolution routes inside `admin_controls_router`.
-- Added focused router regressions for queue creation, pending-approval listing, explicit approval execution, explicit rejection without mutation, and unsupported-command rejection. Validated the slice with `python -m pytest tests/test_phase1_router_regressions.py -k "text_command" -q --tb=no` at `6` passing checks, the adjacent admin-controls subset at `10` passing checks, the full router regression file at `154` passing checks, and a live queue/list/reject probe on port `8065` during market hours.
+- Implemented the next adjacent Phase 5 operator-facing slice in the existing controls console instead of requiring raw API calls to review or resolve text-admin requests.
+- `frontend/src/components/controls/OperationsControlPanel.tsx` now adds a text-command composer, preview surface, auto-refreshing pending-approval list, and explicit approve or reject actions backed by `/api/controls/text-command` plus `/api/controls/text-command/approvals`; it also refreshes the shared controls snapshot after approval so the rest of the manual-controls UI does not go stale.
+- Validated the slice with `npx eslint src/components/controls/OperationsControlPanel.tsx` clean; a broader `npx tsc --noEmit` remains blocked by a pre-existing unrelated typing error in `src/components/dashboard/VolumeProfilePanel.tsx` where `resp` is still inferred as `unknown`.
 
 ## Next Slice Candidates
 
 - Expand the bounded text-command catalog over existing manual-control primitives without bypassing the current authenticated control-plane helpers.
-- Add operator-facing approval UX or reviewer surfaces on top of the new pending-approval list and resolve endpoints so text-admin review is practical outside direct API calls.
+- Add richer reviewer ergonomics on top of the current controls-console queue, such as per-request reviewer notes, richer result history, or push-driven updates instead of polling.
 - Re-run the same market-hours probe on a warmed backend instance and, on an isolated validation instance, exercise one safe approve-then-revert command to close the remaining end-to-end live approval gap.

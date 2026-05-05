@@ -62,6 +62,13 @@ class ApprovalTimeoutRequest(BaseModel):
     reason: str = ""
 
 
+class TextCommandRequest(BaseModel):
+    command: str
+    dry_run: bool = True
+    operator: str = "admin_text"
+    reason: str = ""
+
+
 class BacktestConfigRequest(BaseModel):
     capital: Optional[float] = None
     slippage_bps: Optional[int] = None
@@ -353,6 +360,17 @@ async def get_command_journal(
         limit=limit,
         action=action,
         strategy_id=strategy_id,
+    )
+
+
+@router.post("/api/controls/text-command")
+async def process_text_command(body: TextCommandRequest):
+    return await mc.process_text_command(
+        cache,
+        body.command,
+        dry_run=body.dry_run,
+        operator=body.operator,
+        reason=body.reason,
     )
 
 

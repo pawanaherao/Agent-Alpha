@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -250,6 +251,278 @@ async def get_command_journal(
     if error:
         payload["error"] = error
     return payload
+
+
+TEXT_COMMAND_EXAMPLES: List[str] = [
+    "disable equity scanner",
+    "enable option scanner",
+    "disable leg monitor",
+    "set approval timeout to 45 seconds",
+    "set regime override to bear for 30 minutes",
+    "clear regime override",
+    "set position sizing to 0.5x for 4 hours",
+    "set rate limit to 6 orders per cycle",
+]
+
+
+def _normalize_text_command(command: str) -> str:
+    return " ".join(command.strip().lower().split())
+
+
+def preview_text_command(command: str, operator: str = "system", reason: str = "") -> Dict[str, Any]:
+    normalized = _normalize_text_command(command)
+    if not normalized:
+        return {
+            "success": False,
+            "recognized": False,
+            "command": command,
+            "error": "Text command cannot be empty",
+            "supported_examples": TEXT_COMMAND_EXAMPLES,
+        }
+
+    toggle_match = re.fullmatch(r"(enable|disable)\s+(equity|option|options)\s+scanner", normalized)
+    if toggle_match:
+        verb, target = toggle_match.groups()
+        enabled = verb == "enable"
+        target_name = "equity" if target == "equity" else "option"
+        return {
+            "success": True,
+            "recognized": True,
+            "command": command,
+            "normalized_command": normalized,
+            "intent": f"toggle_{target_name}_scanner",
+            "scope": "text_admin",
+            "mutates_state": True,
+            "requires_confirmation": True,
+            "operator": operator or "system",
+            "reason": reason or f"text_command:{normalized}",
+            "summary": f"{verb.title()} {target_name} scanner",
+            "parameters": {"enabled": enabled},
+        }
+
+    legmonitor_match = re.fullmatch(r"(enable|disable)\s+leg\s*monitor", normalized)
+    if legmonitor_match:
+        verb = legmonitor_match.group(1)
+        enabled = verb == "enable"
+        return {
+            "success": True,
+            "recognized": True,
+            "command": command,
+            "normalized_command": normalized,
+            "intent": "toggle_legmonitor",
+            "scope": "text_admin",
+            "mutates_state": True,
+            "requires_confirmation": True,
+            "operator": operator or "system",
+            "reason": reason or f"text_command:{normalized}",
+            "summary": f"{verb.title()} leg monitor",
+            "parameters": {"enabled": enabled},
+        }
+
+    approval_match = re.fullmatch(r"set\s+approval\s+timeout\s+to\s+(\d+)\s+seconds?", normalized)
+    if approval_match:
+        timeout_seconds = int(approval_match.group(1))
+        return {
+            "success": True,
+            "recognized": True,
+            "command": command,
+            "normalized_command": normalized,
+            "intent": "set_approval_timeout",
+            "scope": "text_admin",
+            "mutates_state": True,
+            "requires_confirmation": True,
+            "operator": operator or "system",
+            "reason": reason or f"text_command:{normalized}",
+            "summary": f"Set approval timeout to {timeout_seconds} seconds",
+            "parameters": {"timeout_seconds": timeout_seconds},
+        }
+
+    regime_match = re.fullmatch(
+        r"set\s+regime\s+override\s+to\s+(bull|bear|sideways|volatile)(?:\s+for\s+(\d+)\s+minutes?)?",
+        normalized,
+    )
+    if regime_match:
+        regime, duration_raw = regime_match.groups()
+        duration_minutes = int(duration_raw) if duration_raw else 60
+        return {
+            "success": True,
+            "recognized": True,
+            "command": command,
+            "normalized_command": normalized,
+            "intent": "set_regime_override",
+            "scope": "text_admin",
+            "mutates_state": True,
+            "requires_confirmation": True,
+            "operator": operator or "system",
+            "reason": reason or f"text_command:{normalized}",
+            "summary": f"Set regime override to {regime.upper()} for {duration_minutes} minutes",
+            "parameters": {"regime": regime.upper(), "duration_minutes": duration_minutes},
+        }
+
+    if normalized == "clear regime override":
+        return {
+            "success": True,
+            "recognized": True,
+            "command": command,
+            "normalized_command": normalized,
+            "intent": "clear_regime_override",
+            "scope": "text_admin",
+            "mutates_state": True,
+            "requires_confirmation": True,
+            "operator": operator or "system",
+            "reason": reason or f"text_command:{normalized}",
+            "summary": "Clear active regime override",
+            "parameters": {},
+        }
+
+    sizing_match = re.fullmatch(
+        r"set\s+position\s+sizing\s+to\s+(\d+(?:\.\d+)?)x(?:\s+for\s+(\d+)\s+hours?)?",
+        normalized,
+    )
+    if sizing_match:
+        multiplier_raw, duration_raw = sizing_match.groups()
+        multiplier = float(multiplier_raw)
+        duration_hours = int(duration_raw) if duration_raw else 4
+        return {
+            "success": True,
+            "recognized": True,
+            "command": command,
+            "normalized_command": normalized,
+            "intent": "set_position_sizing",
+            "scope": "text_admin",
+            "mutates_state": True,
+            "requires_confirmation": True,
+            "operator": operator or "system",
+            "reason": reason or f"text_command:{normalized}",
+            "summary": f"Set position sizing to {multiplier}x for {duration_hours} hours",
+            "parameters": {"multiplier": multiplier, "duration_hours": duration_hours},
+        }
+
+    rate_limit_match = re.fullmatch(
+        r"set\s+rate\s+limit\s+to\s+(\d+)\s+orders?\s+per\s+cycle",
+        normalized,
+    )
+    if rate_limit_match:
+        max_orders_per_cycle = int(rate_limit_match.group(1))
+        return {
+            "success": True,
+            "recognized": True,
+            "command": command,
+            "normalized_command": normalized,
+            "intent": "set_rate_limit",
+            "scope": "text_admin",
+            "mutates_state": True,
+            "requires_confirmation": True,
+            "operator": operator or "system",
+            "reason": reason or f"text_command:{normalized}",
+            "summary": f"Set rate limit to {max_orders_per_cycle} orders per cycle",
+            "parameters": {"max_orders_per_cycle": max_orders_per_cycle},
+        }
+
+    return {
+        "success": False,
+        "recognized": False,
+        "command": command,
+        "normalized_command": normalized,
+        "error": "Unsupported text command",
+        "supported_examples": TEXT_COMMAND_EXAMPLES,
+    }
+
+
+async def process_text_command(
+    cache,
+    command: str,
+    dry_run: bool = True,
+    operator: str = "system",
+    reason: str = "",
+) -> Dict[str, Any]:
+    plan = preview_text_command(command, operator=operator, reason=reason)
+
+    if not plan.get("recognized"):
+        await record_command(
+            cache,
+            "text_command_rejected",
+            {
+                "scope": "text_admin",
+                "operator": operator or "system",
+                "status": "rejected",
+                "reason": reason or "unsupported_text_command",
+                "text_command": command,
+                "error": plan.get("error", "Unsupported text command"),
+            },
+        )
+        return {**plan, "dry_run": dry_run}
+
+    if dry_run:
+        await record_command(
+            cache,
+            "text_command_preview",
+            {
+                "scope": "text_admin",
+                "operator": plan["operator"],
+                "status": "preview",
+                "reason": plan["reason"],
+                "text_command": command,
+                "intent": plan["intent"],
+                "parameters": plan["parameters"],
+            },
+        )
+        return {"success": True, "recognized": True, "dry_run": True, "plan": plan}
+
+    await record_command(
+        cache,
+        "text_command_execute",
+        {
+            "scope": "text_admin",
+            "operator": plan["operator"],
+            "status": "requested",
+            "reason": plan["reason"],
+            "text_command": command,
+            "intent": plan["intent"],
+            "parameters": plan["parameters"],
+        },
+    )
+
+    intent = plan["intent"]
+    parameters = plan["parameters"]
+    plan_reason = plan["reason"]
+
+    if intent == "toggle_equity_scanner":
+        result = await toggle_equity_scanner(cache, parameters["enabled"], plan_reason)
+    elif intent == "toggle_option_scanner":
+        result = await toggle_option_scanner(cache, parameters["enabled"], plan_reason)
+    elif intent == "toggle_legmonitor":
+        result = await toggle_legmonitor(cache, parameters["enabled"], plan_reason)
+    elif intent == "set_approval_timeout":
+        result = await set_approval_timeout(cache, parameters["timeout_seconds"], plan_reason)
+    elif intent == "set_regime_override":
+        result = await set_regime_override(
+            cache,
+            parameters["regime"],
+            parameters["duration_minutes"],
+            plan_reason,
+        )
+    elif intent == "clear_regime_override":
+        result = await clear_regime_override(cache)
+    elif intent == "set_position_sizing":
+        result = await set_position_sizing(
+            cache,
+            parameters["multiplier"],
+            parameters["duration_hours"],
+            plan_reason,
+        )
+    elif intent == "set_rate_limit":
+        result = await set_rate_limit(cache, parameters["max_orders_per_cycle"], plan_reason)
+    else:
+        result = {"success": False, "error": f"Unsupported text intent: {intent}"}
+
+    return {
+        "success": bool(result.get("success", True)),
+        "recognized": True,
+        "dry_run": False,
+        "plan": plan,
+        "result": result,
+    }
 
 # ===========================================================================
 # 1. STRATEGY ENABLE / DISABLE

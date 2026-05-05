@@ -380,6 +380,95 @@ def test_equity_scanner_toggle_route_delegates_to_manual_controls(monkeypatch):
     toggle_equity_scanner.assert_awaited_once_with(fake_cache, False, "maintenance")
 
 
+def test_text_command_route_returns_dry_run_plan_without_mutation(monkeypatch):
+    fake_cache = FakeCache()
+
+    monkeypatch.setattr(admin_controls_router, "cache", fake_cache)
+    monkeypatch.setattr(postgres_db, "pool", None)
+
+    client = TestClient(_build_router_app(admin_controls_router))
+    response = client.post(
+        "/api/controls/text-command",
+        json={
+            "command": "disable equity scanner",
+            "dry_run": True,
+            "operator": "phase5-test",
+            "reason": "market-hours preview",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["dry_run"] is True
+    assert body["plan"]["intent"] == "toggle_equity_scanner"
+    assert body["plan"]["parameters"] == {"enabled": False}
+    assert manual_controls._k("scanner_controls") not in fake_cache.store
+
+    journal = json.loads(fake_cache.store[manual_controls._k("command_journal")])
+    assert journal[-1]["action"] == "text_command_preview"
+    assert journal[-1]["text_command"] == "disable equity scanner"
+    assert journal[-1]["status"] == "preview"
+
+
+def test_text_command_route_executes_supported_command(monkeypatch):
+    fake_cache = FakeCache()
+    execute_command = AsyncMock(return_value={"success": True, "equity_scanner_enabled": False})
+    record_command = AsyncMock()
+
+    monkeypatch.setattr(admin_controls_router, "cache", fake_cache)
+    monkeypatch.setattr(admin_controls_router.mc, "toggle_equity_scanner", execute_command)
+    monkeypatch.setattr(admin_controls_router.mc, "record_command", record_command)
+
+    client = TestClient(_build_router_app(admin_controls_router))
+    response = client.post(
+        "/api/controls/text-command",
+        json={
+            "command": "disable equity scanner",
+            "dry_run": False,
+            "operator": "phase5-test",
+            "reason": "market-hours maintenance",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["dry_run"] is False
+    assert body["plan"]["intent"] == "toggle_equity_scanner"
+    assert body["result"] == {"success": True, "equity_scanner_enabled": False}
+    execute_command.assert_awaited_once_with(fake_cache, False, "market-hours maintenance")
+    record_command.assert_awaited_once()
+    assert record_command.await_args.args[1] == "text_command_execute"
+
+
+def test_text_command_route_returns_supported_examples_for_unknown_command(monkeypatch):
+    fake_cache = FakeCache()
+    record_command = AsyncMock()
+
+    monkeypatch.setattr(admin_controls_router, "cache", fake_cache)
+    monkeypatch.setattr(admin_controls_router.mc, "record_command", record_command)
+
+    client = TestClient(_build_router_app(admin_controls_router))
+    response = client.post(
+        "/api/controls/text-command",
+        json={
+            "command": "sell everything now",
+            "dry_run": True,
+            "operator": "phase5-test",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["recognized"] is False
+    assert body["error"] == "Unsupported text command"
+    assert "disable equity scanner" in body["supported_examples"]
+    record_command.assert_awaited_once()
+    assert record_command.await_args.args[1] == "text_command_rejected"
+
+
 def test_diagnostics_latest_route_returns_cached_payload(monkeypatch):
     fake_cache = FakeCache()
     fake_cache.store["diagnostics_latest"] = json.dumps({

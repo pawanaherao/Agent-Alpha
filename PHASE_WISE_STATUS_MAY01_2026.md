@@ -2,12 +2,13 @@
 
 ## Current Snapshot
 
-- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, plus the first authenticated Phase 5 text-admin gateway on top of the existing manual-controls authority boundary.
-- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `145 passed`.
+- Focus area: backend resilience hardening around ai_router/provider status paths and extracted operator/public runtime routes, plus the next authenticated Phase 5 text-admin slice that moves mutating text commands behind an explicit approval queue on top of the existing manual-controls authority boundary.
+- Latest focused validation: `python -m pytest tests/test_phase1_router_regressions.py -q --tb=no` -> `154 passed`.
 - Latest full backend validation: `python -m pytest tests/ -q --tb=no` -> `410 passed`.
-- Latest slice validation (2026-05-05): `python -m pytest tests/test_phase1_router_regressions.py -k "text_command_route or equity_scanner_toggle_route_delegates_to_manual_controls" -q --tb=no` -> `4 passed`.
-- Latest live market validation (2026-05-05): a fresh token-backed validation instance on port `8064` reached `/health` healthy with `market_open=true`, started Dhan MarketFeed, returned `200` from the new `/api/controls/text-command` dry-run route during an active cycle, and on a wider re-probe returned `/api/system/telemetry` with `cycle_status=in_progress`, `current_phase=decision`, `cycle_timing_health.total_ms ≈ 55,286`, plus non-null route-level OFI for `RELIANCE` with `weighted_ofi=-0.1584` and `levels_with_data=40`.
-- Latest live runtime findings: the first fresh-start market-hours reads for `/api/system/telemetry` and `/api/charts/volume-profile/RELIANCE` still timed out once under active-cycle startup pressure, but the wider follow-up re-probe succeeded, which narrows the remaining live sensitivity to first-probe startup pressure rather than a persistent route failure. The Redis bool-serialization warning is closed, the telemetry route prefers cached `session_telemetry` plus batched Redis reads, `/health` serves a short-lived cached snapshot, the merged StrategyAgent GenAI validation prompt now builds once per batch, and the first Phase 5 text-admin gateway now proves authenticated dry-run command parsing works during live market load without mutating runtime.
+- Latest slice validation (2026-05-05): `python -m pytest tests/test_phase1_router_regressions.py -k "text_command" -q --tb=no` -> `6 passed`.
+- Latest adjacent validation (2026-05-05): `python -m pytest tests/test_phase1_router_regressions.py -k "command_journal_route or audit_log_route or text_command or equity_scanner_toggle_route_delegates_to_manual_controls" -q --tb=no` -> `10 passed`.
+- Latest live market validation (2026-05-05): a fresh token-backed validation instance on port `8065` reached `/health` healthy with `market_open=true`, started Dhan MarketFeed before companion sockets, accepted `POST /api/controls/text-command` for `disable equity scanner` with `dry_run=false`, returned a `PENDING` approval request instead of mutating runtime, exposed that request through `GET /api/controls/text-command/approvals`, and cleared it through the authenticated reject path while the command journal recorded both the approval-request and rejection events.
+- Latest live runtime findings: the earlier fresh-start market-hours `8064` probe still showed one-time startup pressure on the first `/api/system/telemetry` and route-level OFI reads before a wider re-probe succeeded, which keeps the remaining live sensitivity narrowed to first-probe startup pressure rather than a persistent route failure. On the new `8065` instance, the approval-backed Phase 5 gateway proved the control-plane now queues mutating text commands for explicit review instead of executing them immediately, while preserving attributable journal history and avoiding runtime mutation during the live probe.
 
 ## Phase 1 — Router And Runtime Hardening
 
@@ -73,21 +74,21 @@ Status: stable, green
 
 ## Phase 5 — Text-Admin Copilot Foundation
 
-Status: active, 15%
+Status: active, 25%
 
-- The first formal Phase 5 slice is now in code: authenticated `/api/controls/text-command` routing on top of the existing `admin_controls_router` and `manual_controls` authority boundary.
-- The gateway supports deterministic intent parsing plus dry-run plan rendering for a bounded command catalog, and it can execute supported intents only by delegating to existing validated manual-control functions.
-- Preview, rejected, and execute requests are now journaled so text-admin activity is attributable and reviewable even before a richer approval UX lands.
-- Remaining work is explicit approval-backed execution for mutating text commands, broader intent coverage, and operator-facing review or approval flow polish.
+- The first two formal Phase 5 slices are now in code: authenticated `/api/controls/text-command` routing plus dedicated `/api/controls/text-command/approvals` review paths on top of the existing `admin_controls_router` and `manual_controls` authority boundary.
+- The gateway supports deterministic intent parsing plus dry-run plan rendering for a bounded command catalog, and mutating requests now queue for approval instead of executing immediately from the initial text-command submission.
+- Preview, approval-request, rejection, and approval-resolution activity is journaled so text-admin actions are attributable and reviewable through the same authenticated control-plane history.
+- Remaining work is broader intent coverage, operator-facing approval UX polish, and a warmed market-hours approve-then-revert validation on an isolated instance.
 
 ## Latest Slice
 
-- Implemented the first adjacent Phase 5 text-admin slice in the authenticated control plane instead of adding a side-channel prompt path.
-- `manual_controls` now parses a bounded text-command catalog into deterministic plans, supports dry-run previews by default, records preview or rejected or execute events in the durable command journal, and delegates live execution only through existing validated control-plane helpers such as scanner toggles, regime override, approval timeout, position sizing, and rate-limit updates.
-- Added focused router regressions for dry-run preview, delegated execution, and unsupported-command rejection, and validated the slice with `python -m pytest tests/test_phase1_router_regressions.py -k "text_command_route or equity_scanner_toggle_route_delegates_to_manual_controls" -q --tb=no` at `4` passing checks plus a live dry-run probe on port `8064` during market hours.
+- Implemented the next adjacent Phase 5 text-admin slice in the authenticated control plane instead of allowing direct mutation from the initial text-command submission.
+- `manual_controls` still parses the bounded text-command catalog into deterministic plans and dry-run previews, but mutating requests now enter a dedicated approval queue with Redis-backed pending-request storage and execute only from explicit approval resolution routes inside `admin_controls_router`.
+- Added focused router regressions for queue creation, pending-approval listing, explicit approval execution, explicit rejection without mutation, and unsupported-command rejection. Validated the slice with `python -m pytest tests/test_phase1_router_regressions.py -k "text_command" -q --tb=no` at `6` passing checks, the adjacent admin-controls subset at `10` passing checks, the full router regression file at `154` passing checks, and a live queue/list/reject probe on port `8065` during market hours.
 
 ## Next Slice Candidates
 
-- Add an approval-backed execution path for mutating text commands so dry-run plans can graduate into explicit reviewable control actions instead of direct operator submission.
 - Expand the bounded text-command catalog over existing manual-control primitives without bypassing the current authenticated control-plane helpers.
-- Re-run the same market-hours probe on a warmed backend instance to verify whether the remaining telemetry or OFI sensitivity is now limited to first-start startup pressure only.
+- Add operator-facing approval UX or reviewer surfaces on top of the new pending-approval list and resolve endpoints so text-admin review is practical outside direct API calls.
+- Re-run the same market-hours probe on a warmed backend instance and, on an isolated validation instance, exercise one safe approve-then-revert command to close the remaining end-to-end live approval gap.

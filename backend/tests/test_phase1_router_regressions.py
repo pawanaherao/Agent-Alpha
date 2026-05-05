@@ -436,10 +436,107 @@ def test_text_command_route_executes_supported_command(monkeypatch):
     assert body["success"] is True
     assert body["dry_run"] is False
     assert body["plan"]["intent"] == "toggle_equity_scanner"
-    assert body["result"] == {"success": True, "equity_scanner_enabled": False}
-    execute_command.assert_awaited_once_with(fake_cache, False, "market-hours maintenance")
+    assert body["queued_for_approval"] is True
+    assert body["approval_request"]["status"] == "PENDING"
+    execute_command.assert_not_awaited()
     record_command.assert_awaited_once()
-    assert record_command.await_args.args[1] == "text_command_execute"
+    assert record_command.await_args.args[1] == "text_command_approval_requested"
+
+
+def test_text_command_approvals_route_returns_pending_requests(monkeypatch):
+    fake_cache = FakeCache()
+    monkeypatch.setattr(admin_controls_router, "cache", fake_cache)
+    monkeypatch.setattr(postgres_db, "pool", None)
+
+    client = TestClient(_build_router_app(admin_controls_router))
+    queue_response = client.post(
+        "/api/controls/text-command",
+        json={
+            "command": "disable equity scanner",
+            "dry_run": False,
+            "operator": "phase5-test",
+            "reason": "queue check",
+        },
+    )
+    request_id = queue_response.json()["approval_request"]["request_id"]
+
+    response = client.get("/api/controls/text-command/approvals")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert body["approvals"][0]["requestId"] == request_id
+    assert body["approvals"][0]["intent"] == "toggle_equity_scanner"
+    assert body["approvals"][0]["status"] == "PENDING"
+
+
+def test_text_command_approve_route_executes_queued_command(monkeypatch):
+    fake_cache = FakeCache()
+    execute_command = AsyncMock(return_value={"success": True, "equity_scanner_enabled": False})
+
+    monkeypatch.setattr(admin_controls_router, "cache", fake_cache)
+    monkeypatch.setattr(admin_controls_router.mc, "toggle_equity_scanner", execute_command)
+    monkeypatch.setattr(postgres_db, "pool", None)
+
+    client = TestClient(_build_router_app(admin_controls_router))
+    queue_response = client.post(
+        "/api/controls/text-command",
+        json={
+            "command": "disable equity scanner",
+            "dry_run": False,
+            "operator": "phase5-test",
+            "reason": "approval queue",
+        },
+    )
+    request_id = queue_response.json()["approval_request"]["request_id"]
+
+    response = client.post(
+        f"/api/controls/text-command/approvals/{request_id}/approve",
+        json={"operator": "phase5-reviewer", "reason": "approved"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["approved"] is True
+    assert body["request_id"] == request_id
+    assert body["result"] == {"success": True, "equity_scanner_enabled": False}
+    execute_command.assert_awaited_once_with(fake_cache, False, "approval queue")
+    assert manual_controls._k(f"text_command_request:{request_id}") not in fake_cache.store
+
+
+def test_text_command_reject_route_clears_request_without_execution(monkeypatch):
+    fake_cache = FakeCache()
+    execute_command = AsyncMock(return_value={"success": True, "equity_scanner_enabled": False})
+
+    monkeypatch.setattr(admin_controls_router, "cache", fake_cache)
+    monkeypatch.setattr(admin_controls_router.mc, "toggle_equity_scanner", execute_command)
+    monkeypatch.setattr(postgres_db, "pool", None)
+
+    client = TestClient(_build_router_app(admin_controls_router))
+    queue_response = client.post(
+        "/api/controls/text-command",
+        json={
+            "command": "disable equity scanner",
+            "dry_run": False,
+            "operator": "phase5-test",
+            "reason": "approval queue",
+        },
+    )
+    request_id = queue_response.json()["approval_request"]["request_id"]
+
+    response = client.post(
+        f"/api/controls/text-command/approvals/{request_id}/reject",
+        json={"operator": "phase5-reviewer", "reason": "rejected"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["approved"] is False
+    assert body["request_id"] == request_id
+    execute_command.assert_not_awaited()
+    assert manual_controls._k(f"text_command_request:{request_id}") not in fake_cache.store
 
 
 def test_text_command_route_returns_supported_examples_for_unknown_command(monkeypatch):

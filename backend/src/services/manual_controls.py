@@ -264,6 +264,12 @@ TEXT_COMMAND_EXAMPLES: List[str] = [
     "set rate limit to 6 orders per cycle",
 ]
 
+TEXT_COMMAND_APPROVAL_TTL_SECONDS = 300
+
+
+def _text_command_request_key(request_id: str) -> str:
+    return _k(f"text_command_request:{request_id}")
+
 
 def _normalize_text_command(command: str) -> str:
     return " ".join(command.strip().lower().split())
@@ -429,6 +435,258 @@ def preview_text_command(command: str, operator: str = "system", reason: str = "
     }
 
 
+async def _read_text_command_pending_entries(cache) -> List[Dict[str, Any]]:
+    raw = await cache.get(_k("text_command_pending_approvals"))
+    if not raw:
+        return []
+
+    try:
+        entries = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        logger.warning("Failed to decode text command pending approvals payload")
+        return []
+
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
+async def _write_text_command_pending_entries(cache, entries: List[Dict[str, Any]]) -> None:
+    await cache.set(
+        _k("text_command_pending_approvals"),
+        json.dumps(entries, default=str),
+        ttl=TEXT_COMMAND_APPROVAL_TTL_SECONDS,
+    )
+
+
+async def _remove_text_command_request(cache, request_id: str) -> None:
+    await cache.delete(_text_command_request_key(request_id))
+    pending = await _read_text_command_pending_entries(cache)
+    pending = [entry for entry in pending if entry.get("id") != request_id]
+    await _write_text_command_pending_entries(cache, pending)
+
+
+async def _queue_text_command_for_approval(cache, command: str, plan: Dict[str, Any]) -> Dict[str, Any]:
+    request_id = str(uuid4())
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=TEXT_COMMAND_APPROVAL_TTL_SECONDS)
+
+    approval_request = {
+        "id": request_id,
+        "command": command,
+        "plan": plan,
+        "timestamp": now.isoformat(),
+        "expiresAt": expires_at.isoformat(),
+        "status": "PENDING",
+        "scope": "text_admin",
+    }
+    await cache.set(
+        _text_command_request_key(request_id),
+        json.dumps(approval_request, default=str),
+        ttl=TEXT_COMMAND_APPROVAL_TTL_SECONDS,
+    )
+
+    pending = await _read_text_command_pending_entries(cache)
+    pending.append(
+        {
+            "id": request_id,
+            "intent": plan.get("intent"),
+            "summary": plan.get("summary"),
+            "timestamp": now.isoformat(),
+            "expiresAt": expires_at.isoformat(),
+            "scope": "text_admin",
+        }
+    )
+    await _write_text_command_pending_entries(cache, pending)
+
+    await record_command(
+        cache,
+        "text_command_approval_requested",
+        {
+            "scope": "text_admin",
+            "operator": plan.get("operator", "system"),
+            "status": "pending_approval",
+            "reason": plan.get("reason", ""),
+            "text_command": command,
+            "intent": plan.get("intent"),
+            "parameters": plan.get("parameters", {}),
+            "request_id": request_id,
+            "expires_at": expires_at.isoformat(),
+        },
+    )
+
+    return {
+        "request_id": request_id,
+        "status": "PENDING",
+        "expires_at": expires_at.isoformat(),
+        "ttl_seconds": TEXT_COMMAND_APPROVAL_TTL_SECONDS,
+    }
+
+
+async def _execute_text_command_plan(cache, plan: Dict[str, Any]) -> Dict[str, Any]:
+    intent = plan["intent"]
+    parameters = plan["parameters"]
+    plan_reason = plan["reason"]
+
+    if intent == "toggle_equity_scanner":
+        return await toggle_equity_scanner(cache, parameters["enabled"], plan_reason)
+    if intent == "toggle_option_scanner":
+        return await toggle_option_scanner(cache, parameters["enabled"], plan_reason)
+    if intent == "toggle_legmonitor":
+        return await toggle_legmonitor(cache, parameters["enabled"], plan_reason)
+    if intent == "set_approval_timeout":
+        return await set_approval_timeout(cache, parameters["timeout_seconds"], plan_reason)
+    if intent == "set_regime_override":
+        return await set_regime_override(
+            cache,
+            parameters["regime"],
+            parameters["duration_minutes"],
+            plan_reason,
+        )
+    if intent == "clear_regime_override":
+        return await clear_regime_override(cache)
+    if intent == "set_position_sizing":
+        return await set_position_sizing(
+            cache,
+            parameters["multiplier"],
+            parameters["duration_hours"],
+            plan_reason,
+        )
+    if intent == "set_rate_limit":
+        return await set_rate_limit(cache, parameters["max_orders_per_cycle"], plan_reason)
+    return {"success": False, "error": f"Unsupported text intent: {intent}"}
+
+
+async def get_pending_text_command_approvals(cache) -> Dict[str, Any]:
+    pending = await _read_text_command_pending_entries(cache)
+    now = datetime.now(timezone.utc)
+    active_requests: List[Dict[str, Any]] = []
+    active_ids: set[str] = set()
+
+    for entry in pending:
+        request_id = str(entry.get("id", ""))
+        if not request_id:
+            continue
+        raw = await cache.get(_text_command_request_key(request_id))
+        if not raw:
+            continue
+
+        approval = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(approval, dict):
+            continue
+
+        expires_at_raw = approval.get("expiresAt")
+        try:
+            expires_at = datetime.fromisoformat(expires_at_raw)
+        except Exception:
+            continue
+
+        if expires_at <= now:
+            await cache.delete(_text_command_request_key(request_id))
+            continue
+
+        active_ids.add(request_id)
+        expires_in = max(0.0, (expires_at - now).total_seconds())
+        plan = approval.get("plan", {}) if isinstance(approval.get("plan"), dict) else {}
+        active_requests.append(
+            {
+                "id": request_id,
+                "requestId": request_id,
+                "command": approval.get("command", ""),
+                "intent": plan.get("intent"),
+                "summary": plan.get("summary"),
+                "parameters": plan.get("parameters", {}),
+                "timestamp": approval.get("timestamp", ""),
+                "expiresAt": approval.get("expiresAt", ""),
+                "expiresIn": round(expires_in, 1),
+                "status": approval.get("status", "PENDING"),
+                "scope": approval.get("scope", "text_admin"),
+            }
+        )
+
+    if len(active_ids) != len(pending):
+        pending = [entry for entry in pending if entry.get("id") in active_ids]
+        await _write_text_command_pending_entries(cache, pending)
+
+    return {"count": len(active_requests), "approvals": active_requests}
+
+
+async def approve_text_command(cache, request_id: str, operator: str = "system", reason: str = "") -> Dict[str, Any]:
+    raw = await cache.get(_text_command_request_key(request_id))
+    if not raw:
+        return {"success": False, "approved": False, "error": f"Text command approval not found or expired: {request_id}"}
+
+    approval = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(approval, dict):
+        await _remove_text_command_request(cache, request_id)
+        return {"success": False, "approved": False, "error": f"Text command approval invalid: {request_id}"}
+
+    plan = approval.get("plan", {}) if isinstance(approval.get("plan"), dict) else {}
+    result = await _execute_text_command_plan(cache, plan)
+    await _remove_text_command_request(cache, request_id)
+
+    await record_command(
+        cache,
+        "text_command_approved",
+        {
+            "scope": "text_admin",
+            "operator": operator or "system",
+            "status": "approved",
+            "reason": reason or approval.get("plan", {}).get("reason", ""),
+            "request_id": request_id,
+            "text_command": approval.get("command", ""),
+            "intent": plan.get("intent"),
+            "parameters": plan.get("parameters", {}),
+            "result": result,
+        },
+    )
+
+    return {
+        "success": bool(result.get("success", True)),
+        "approved": True,
+        "request_id": request_id,
+        "command": approval.get("command", ""),
+        "result": result,
+    }
+
+
+async def reject_text_command(cache, request_id: str, operator: str = "system", reason: str = "") -> Dict[str, Any]:
+    raw = await cache.get(_text_command_request_key(request_id))
+    if not raw:
+        return {"success": False, "approved": False, "error": f"Text command approval not found or expired: {request_id}"}
+
+    approval = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(approval, dict):
+        await _remove_text_command_request(cache, request_id)
+        return {"success": False, "approved": False, "error": f"Text command approval invalid: {request_id}"}
+
+    plan = approval.get("plan", {}) if isinstance(approval.get("plan"), dict) else {}
+    await _remove_text_command_request(cache, request_id)
+
+    await record_command(
+        cache,
+        "text_command_approval_rejected",
+        {
+            "scope": "text_admin",
+            "operator": operator or "system",
+            "status": "rejected",
+            "reason": reason or "user_rejected",
+            "request_id": request_id,
+            "text_command": approval.get("command", ""),
+            "intent": plan.get("intent"),
+            "parameters": plan.get("parameters", {}),
+        },
+    )
+
+    return {
+        "success": True,
+        "approved": False,
+        "request_id": request_id,
+        "command": approval.get("command", ""),
+        "message": "Text command rejected",
+    }
+
+
 async def process_text_command(
     cache,
     command: str,
@@ -469,52 +727,18 @@ async def process_text_command(
         )
         return {"success": True, "recognized": True, "dry_run": True, "plan": plan}
 
-    await record_command(
-        cache,
-        "text_command_execute",
-        {
-            "scope": "text_admin",
-            "operator": plan["operator"],
-            "status": "requested",
-            "reason": plan["reason"],
-            "text_command": command,
-            "intent": plan["intent"],
-            "parameters": plan["parameters"],
-        },
-    )
+    if plan.get("requires_confirmation", plan.get("mutates_state", False)):
+        approval_request = await _queue_text_command_for_approval(cache, command, plan)
+        return {
+            "success": True,
+            "recognized": True,
+            "dry_run": False,
+            "queued_for_approval": True,
+            "plan": plan,
+            "approval_request": approval_request,
+        }
 
-    intent = plan["intent"]
-    parameters = plan["parameters"]
-    plan_reason = plan["reason"]
-
-    if intent == "toggle_equity_scanner":
-        result = await toggle_equity_scanner(cache, parameters["enabled"], plan_reason)
-    elif intent == "toggle_option_scanner":
-        result = await toggle_option_scanner(cache, parameters["enabled"], plan_reason)
-    elif intent == "toggle_legmonitor":
-        result = await toggle_legmonitor(cache, parameters["enabled"], plan_reason)
-    elif intent == "set_approval_timeout":
-        result = await set_approval_timeout(cache, parameters["timeout_seconds"], plan_reason)
-    elif intent == "set_regime_override":
-        result = await set_regime_override(
-            cache,
-            parameters["regime"],
-            parameters["duration_minutes"],
-            plan_reason,
-        )
-    elif intent == "clear_regime_override":
-        result = await clear_regime_override(cache)
-    elif intent == "set_position_sizing":
-        result = await set_position_sizing(
-            cache,
-            parameters["multiplier"],
-            parameters["duration_hours"],
-            plan_reason,
-        )
-    elif intent == "set_rate_limit":
-        result = await set_rate_limit(cache, parameters["max_orders_per_cycle"], plan_reason)
-    else:
-        result = {"success": False, "error": f"Unsupported text intent: {intent}"}
+    result = await _execute_text_command_plan(cache, plan)
 
     return {
         "success": bool(result.get("success", True)),

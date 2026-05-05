@@ -69,6 +69,11 @@ class TextCommandRequest(BaseModel):
     reason: str = ""
 
 
+class TextCommandApprovalDecisionRequest(BaseModel):
+    operator: str = "admin_text"
+    reason: str = ""
+
+
 class BacktestConfigRequest(BaseModel):
     capital: Optional[float] = None
     slippage_bps: Optional[int] = None
@@ -372,6 +377,21 @@ async def process_text_command(body: TextCommandRequest):
         operator=body.operator,
         reason=body.reason,
     )
+
+
+@router.get("/api/controls/text-command/approvals")
+async def get_text_command_approvals():
+    return await mc.get_pending_text_command_approvals(cache)
+
+
+@router.post("/api/controls/text-command/approvals/{request_id}/approve")
+async def approve_text_command(request_id: str, body: TextCommandApprovalDecisionRequest):
+    return await mc.approve_text_command(cache, request_id, operator=body.operator, reason=body.reason)
+
+
+@router.post("/api/controls/text-command/approvals/{request_id}/reject")
+async def reject_text_command(request_id: str, body: TextCommandApprovalDecisionRequest):
+    return await mc.reject_text_command(cache, request_id, operator=body.operator, reason=body.reason)
 
 
 @router.get("/api/controls/max-daily-trades")
